@@ -15,20 +15,21 @@ describe('generation delivery', () => {
       const contractPath = join(directory, 'contract.json');
       await writeFile(contractPath, await readFile(CONTRACT));
       const outDir = join(directory, 'generated');
-      expect((await generateFiles({ contractPath, outDir })).status).toBe('written');
-      expect((await generateFiles({ contractPath, outDir, check: true })).status).toBe('current');
+      const options = { contractPath, outDir, rootDir: directory };
+      expect((await generateFiles(options)).status).toBe('written');
+      expect((await generateFiles({ ...options, check: true })).status).toBe('current');
       const formCheck = (await loadFormCheck(join(outDir, 'form-check.generated.json'))).formCheck;
-      expect(formCheck.source.path).toBe('../contract.json');
+      expect(formCheck.source.path).toBe('contract.json');
       const source = await loadBoundaryContract(contractPath);
       expect(() => verifyFormCheckSource(formCheck, source)).not.toThrow();
       const generated = join(outDir, 'order-contract.ts');
       await writeFile(generated, 'stale');
-      expect((await generateFiles({ contractPath, outDir, check: true })).files).toEqual(['order-contract.ts']);
+      expect((await generateFiles({ ...options, check: true })).files).toEqual(['order-contract.ts']);
       expect(await readFile(generated, 'utf8')).toBe('stale');
-      expect((await generateFiles({ contractPath, outDir })).status).toBe('written');
+      expect((await generateFiles(options)).status).toBe('written');
       await writeFile(join(outDir, 'keep.txt'), 'user file');
       await writeFile(generated, 'stale again');
-      await expect(generateFiles({ contractPath, outDir })).rejects.toThrow('unrelated files');
+      await expect(generateFiles(options)).rejects.toThrow('unrelated files');
       expect(await readFile(join(outDir, 'keep.txt'), 'utf8')).toBe('user file');
       expect(await readFile(generated, 'utf8')).toBe('stale again');
     } finally {
@@ -58,7 +59,7 @@ describe('generation delivery', () => {
       await writeFile(contractPath, original);
       const alias = join(directory, 'alias');
       await symlink(realParent, alias, process.platform === 'win32' ? 'junction' : 'dir');
-      await expect(generateFiles({ contractPath, outDir: join(alias, 'generated') }))
+      await expect(generateFiles({ contractPath, outDir: join(alias, 'generated'), rootDir: directory }))
         .rejects.toThrow('authoritative source resolves inside');
       expect(await readFile(contractPath, 'utf8')).toBe(original);
     } finally {

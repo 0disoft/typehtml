@@ -3,7 +3,7 @@ import { dirname, relative, resolve, basename, isAbsolute, sep } from 'node:path
 import { generateContractArtifacts } from './contract/generate.ts';
 import { loadBoundaryContract } from './contract/load.ts';
 
-export type GenerateOptions = Readonly<{ contractPath: string; outDir: string; check?: boolean }>;
+export type GenerateOptions = Readonly<{ contractPath: string; outDir: string; rootDir?: string; check?: boolean }>;
 export type GenerationResult = Readonly<{
   format: 'boundary-generation/1';
   status: 'current' | 'stale' | 'written';
@@ -25,9 +25,12 @@ export async function generateFiles(options: GenerateOptions): Promise<Generatio
   if (isContained(sourceRelative)) {
     throw new Error('the authoritative source must be outside the generated output directory');
   }
+  const rootDir = await realpath(resolve(options.rootDir ?? process.cwd()));
+  const sourceFromRoot = relative(rootDir, sourcePath);
+  if (!isContained(sourceFromRoot)) throw new Error('authoritative source is outside --root');
   const loaded = await loadBoundaryContract(sourcePath);
   const artifacts = generateContractArtifacts(loaded, {
-    sourcePath: sourceRelative.replaceAll('\\', '/'), sourceSha256: loaded.sourceSha256,
+    sourcePath: sourceFromRoot.replaceAll('\\', '/'), sourceSha256: loaded.sourceSha256,
   });
   const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
   const content = [artifacts.types, json(artifacts.formCheck), json(artifacts.startFormCheck), json(artifacts.digests)];

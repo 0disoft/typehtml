@@ -2,7 +2,7 @@
   "format": "boundary-form-check/0.2-draft",
   "status": "generated-design-reference-not-product-output",
   "source": {
-    "path": "../../docs/design/v0.5/examples/order.boundary.json",
+    "path": "docs/design/v0.5/examples/order.boundary.json",
     "sha256": "8d28473d4cc7141575930268c4843ea6e487ff560d379e206c38b1512050cf4e",
     "generator": "typehtml/contract-projection",
     "projection": "exact-for-selected-structural-fields",

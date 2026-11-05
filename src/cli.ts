@@ -2,7 +2,7 @@
 import { runDoctor, configErrorReport } from './doctor/analyze.ts';
 
 function usage(): never {
-  const report = configErrorReport('<cli>', 'usage: boundary doctor --config <file> | boundary generate --contract <file> --out-dir <directory> [--check]');
+  const report = configErrorReport('<cli>', 'usage: boundary doctor --config <file> | boundary generate --contract <file> --out-dir <directory> [--root <directory>] [--check]');
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   process.exit(2);
 }
@@ -13,6 +13,7 @@ async function main(): Promise<void> {
     const { generateFiles } = await import('./generate.ts');
     let contractPath: string | undefined;
     let outDir: string | undefined;
+    let rootDir: string | undefined;
     let check = false;
     const seen = new Set<string>();
     for (let index = 1; index < args.length; index++) {
@@ -24,11 +25,12 @@ async function main(): Promise<void> {
       if (value === undefined || value.startsWith('--')) usage();
       if (flag === '--contract') contractPath = value;
       else if (flag === '--out-dir') outDir = value;
+      else if (flag === '--root') rootDir = value;
       else usage();
     }
     if (contractPath === undefined || outDir === undefined) usage();
     try {
-      const result = await generateFiles({ contractPath, outDir, check });
+      const result = await generateFiles({ contractPath, outDir, rootDir, check });
       process.stdout.write(`${JSON.stringify(result)}\n`);
       process.exitCode = result.status === 'stale' ? 1 : 0;
     } catch (error) {
