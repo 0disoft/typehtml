@@ -1,5 +1,7 @@
 # P1 참조 런타임 실행 기록
 
+2026-11-06 v0.5 구현 재대조를 마쳤다. 최신 결과는 **165 pass / 0 fail / 557 expect / 22 files**, typecheck·생성물 일치 검사 통과다. 아래 초기 기록의 후속 변경·실제 no-JS 브라우저 새로고침/복제 탭·한계는 [구현 재대조 기록](V05_IMPLEMENTATION_AUDIT.ko.md)에 있다.
+
 - 날짜: 2026-11-05
 - 구현 저장소: `C:/Users/cherr/Documents/workspace/zerodi-wd1/projects/hobby/opensource/typehtml` (독립 git repo, branch `main`)
 - 이 세션의 워크트리 `.worktrees/docs-html-problems`는 문서 작업 위치이며 TypeHTML 구현 대상이 아니다.
@@ -41,7 +43,7 @@
 | 현재 권한 | 부분 확인 | membership 없음, 다른 tenant 상품 404, 비활성 상품, 영수증 권한 철회 404, 로컬 비밀번호 로그인·SQLite 세션·로그아웃 확인. 외부 IdP/OAuth와 계정 관리 화면은 범위 밖 |
 | DB 원자성 | 확인 | CAS 0행 409, 초안 intent UNIQUE, 결과 FK, 정상 만료 rollback, SIGKILL 복구, projection 실패 시 draft/consume/result/audit rollback 확인 |
 | 경합·복구 | 확인 | 실제 두 연결 writer 경합과 503 예산, commit 뒤 응답 유실 replay, SQLite 백업 복구, 프로세스 강제 종료 후 rollback/commit 확인. 설계 14번의 수용 조건은 충족하며, 물리 전원 손실 내구성은 주장하지 않고 2026-11-06 범위 밖으로 확정했다 |
-| intent 수명 | 부분 확인 | 만료 410, 결과 보존 410, 정리, replay, 다른 입력 409 확인. 복제 탭·새로고침의 실제 브라우저 동작은 미실행 |
+| intent 수명 | 확인 | 만료 410, 결과 보존 410, 정리, replay, 다른 입력 409 확인. 2026-11-06 no-JS 브라우저 새로고침·복제 탭이 같은 intent/영수증을 쓰는 것도 확인 |
 | 공개 화면 | 확인 | escaped product name, label/오류 연결, 실제 브라우저 키보드 제출, 접근성 트리 확인. 실제 스크린리더 낭독은 미실행 |
 
 ## 구현 목표에서 제외한 것
@@ -78,4 +80,4 @@ bun test test/adapter/session-store.test.ts
 bun test test/adapter/sqlite-crash.test.ts
 ```
 
-마지막 전체 실행 결과는 이 문서 작성 시점 기준 97 pass / 0 fail / 290 expect, typecheck exit 0이다.
+초기 전체 실행 결과는 97 pass / 0 fail / 290 expect였다. 2026-11-06 후속 전체 실행은 165 pass / 0 fail / 557 expect, typecheck exit 0이며 상세는 구현 재대조 기록에 있다.
