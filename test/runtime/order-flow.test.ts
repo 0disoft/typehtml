@@ -306,3 +306,183 @@ describe('order coordinator and SQLite adapter', () => {
     store.close();
   });
 });
+
+describe('write candidate orchestration', () => {
+  it('preserves role and persistence order with owned frozen facts and exact result metadata', async () => {
+    const { store, loaded } = await setup();
+    const base = createOrderBindings();
+    const phases: string[] = [];
+    const caller = { ...principal };
+    const fields = { productId: 'p_100', quantity: '2' };
+    const loadedProduct = product();
+    let loadContext: object;
+    let authorizationContext: object;
+    let executedDraft: ReturnType<OrderBindings['execute']> | undefined;
+    const bindings: OrderBindings = {
+      ...base,
+      load: (context) => {
+        phases.push('load');
+        loadContext = context;
+        expect(context.principal).not.toBe(caller);
+        expect(Object.isFrozen(context.principal)).toBe(true);
+        expect(Object.isFrozen(context.input)).toBe(true);
+        return loadedProduct;
+      },
+      authorize: (context) => {
+        phases.push('authorize');
+        authorizationContext = context;
+        expect(context).not.toBe(loadContext);
+        expect(context.resource).not.toBe(loadedProduct);
+        expect(Object.isFrozen(context.resource)).toBe(true);
+        return base.authorize(context);
+      },
+      execute: (context) => {
+        phases.push('execute');
+        expect(context).not.toBe(authorizationContext);
+        executedDraft = base.execute(context);
+        return executedDraft;
+      },
+      project: (draft) => {
+        phases.push('project');
+        expect(draft).not.toBe(executedDraft);
+        expect(Object.isFrozen(draft)).toBe(true);
+        return base.project(draft);
+      },
+    };
+    const storage: OrderStorage = {
+      read: (work) => store.read(work),
+      immediate: (work) => store.immediate((tx, issueGrant) => work(new Proxy(tx, {
+        get(target, key) {
+          const method = Reflect.get(target, key);
+          if (typeof method !== 'function') return method;
+          return (...args: unknown[]) => {
+            if (['consumeIntent', 'insertResult', 'insertAudit'].includes(String(key))) phases.push(String(key));
+            return Reflect.apply(method, target, args);
+          };
+        },
+      }), (scope) => { phases.push('grant'); return issueGrant(scope); })),
+    };
+    const coordinator = new OrderCoordinator({ loaded, bindings, storage, now: () => 1_000_123 });
+    try {
+      const begin = await coordinator.beginDraft(caller, 'p_100');
+      const receipt = await coordinator.submitIntent(caller, begin.intentId, fields);
+      expect(phases).toEqual(['load', 'authorize', 'grant', 'execute', 'consumeIntent', 'project', 'insertResult', 'insertAudit']);
+      expect(store.read((tx) => tx.loadResult(begin.intentId))).toEqual({
+        intentId: begin.intentId,
+        draftId: receipt.location.split('/').pop()!,
+        behaviorHash: loaded.behaviorSha256,
+        // bc-input/1: productId is a string and the decoded quantity is integer 2.
+        inputHash: 'aae8be4dbbccaeeff6889697852a2c1f5f900e06d14a01830fd2f5d49024bf26',
+        completedAt: 1_000_123,
+        expiresAt: 87_400_123,
+      });
+      expect(caller).toEqual(principal);
+      expect(fields).toEqual({ productId: 'p_100', quantity: '2' });
+      expect(loadedProduct).toEqual(product());
+      expect(executedDraft).toEqual(store.read((tx) => tx.readDraftByIntent(begin.intentId))!);
+      for (const external of [caller, fields, loadedProduct, executedDraft]) expect(Object.isFrozen(external)).toBe(false);
+    } finally { store.close(); }
+  });
+
+  it.each(['load', 'authorize', 'execute', 'project', 'draft snapshot'] as const)(
+    'keeps REVISION_CONFLICT mapping scoped to execute (%s)', async (phase) => {
+      const base = createOrderBindings();
+      const failure = new Error('REVISION_CONFLICT');
+      const { store, coordinator } = await setup({ bindings: {
+        ...base,
+        load: (context) => { if (phase === 'load') throw failure; return base.load(context); },
+        authorize: (context) => { if (phase === 'authorize') throw failure; return base.authorize(context); },
+        execute: (context) => {
+          if (phase === 'execute') throw failure;
+          const draft = base.execute(context);
+          return phase === 'draft snapshot' ? { ...draft, get quantity(): number { throw failure; } } : draft;
+        },
+        project: (draft) => { if (phase === 'project') throw failure; return base.project(draft); },
+      } });
+      try {
+        const begin = await coordinator.beginDraft(principal, 'p_100');
+        const submitted = coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' });
+        if (phase === 'execute') await expect(submitted).rejects.toMatchObject({ status: 409, code: 'QUOTE_CHANGED' });
+        else await expect(submitted).rejects.toBe(failure);
+        expect(store.read((tx) => tx.loadIntent('tenant_1', 'subject_1', 'orders.createDraft', begin.intentId))?.consumedAt).toBeNull();
+        expect(store.read((tx) => tx.readDraftByIntent(begin.intentId))).toBeNull();
+        expect(store.read((tx) => tx.loadResult(begin.intentId))).toBeNull();
+        expect(store.countAudit()).toBe(0);
+      } finally { store.close(); }
+    },
+  );
+
+  it('reports a failed consume before projection and rolls the executed draft back', async () => {
+    const { store, coordinator, loaded } = await setup();
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    let executions = 0;
+    let projections = 0;
+    const base = createOrderBindings();
+    const storage: OrderStorage = {
+      read: (work) => store.read(work),
+      immediate: (work) => store.immediate((tx, issueGrant) => work(new Proxy(tx, {
+        get(target, key) { return key === 'consumeIntent' ? () => false : Reflect.get(target, key); },
+      }), issueGrant)),
+    };
+    const candidate = new OrderCoordinator({
+      loaded, storage, now: () => 1_000_000,
+      bindings: {
+        ...base,
+        execute: (context) => { executions++; return base.execute(context); },
+        project: () => { projections++; throw new Error('projection must not run'); },
+      },
+    });
+    try {
+      await expect(candidate.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' }))
+        .rejects.toMatchObject({ status: 409, code: 'CAS_CONFLICT' });
+      expect(executions).toBe(1);
+      expect(projections).toBe(0);
+      expect(store.read((tx) => tx.loadIntent('tenant_1', 'subject_1', 'orders.createDraft', begin.intentId))?.consumedAt).toBeNull();
+      expect(store.read((tx) => tx.readDraftByIntent(begin.intentId))).toBeNull();
+      expect(store.read((tx) => tx.loadResult(begin.intentId))).toBeNull();
+      expect(store.countAudit()).toBe(0);
+      await expect(coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' }))
+        .resolves.toHaveProperty('location');
+      expect(store.countAudit()).toBe(1);
+    } finally { store.close(); }
+  });
+
+  it('reads the recovery snapshot before sampling its clock without executing work again', async () => {
+    const { store, coordinator, loaded } = await setup();
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    const phases: string[] = [];
+    let recovering = false;
+    let executions = 0;
+    const base = createOrderBindings();
+    const storage: OrderStorage = {
+      read: (work) => store.read(work),
+      immediate: async (work) => {
+        await store.immediate(work);
+        throw Object.assign(new Error('lost commit acknowledgement'), { name: 'StoreCommitError' });
+      },
+      recoverRead: (work) => {
+        recovering = true;
+        return store.read((tx) => work(new Proxy(tx, {
+          get(target, key) {
+            const method = Reflect.get(target, key);
+            if (typeof method !== 'function') return method;
+            return (...args: unknown[]) => { phases.push(String(key)); return Reflect.apply(method, target, args); };
+          },
+        })));
+      },
+    };
+    const candidate = new OrderCoordinator({
+      loaded, storage,
+      bindings: { ...base, execute: (context) => { executions++; return base.execute(context); } },
+      now: () => { if (recovering) phases.push('clock'); return 1_000_000; },
+    });
+    try {
+      const receipt = await candidate.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' });
+      expect(phases.slice(0, 6)).toEqual(['loadIntent', 'loadResult', 'readDraftByIntent', 'loadProduct', 'currentMember', 'clock']);
+      expect(executions).toBe(1);
+      expect(store.countAudit()).toBe(1);
+      await expect(coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' }))
+        .resolves.toEqual(receipt);
+    } finally { store.close(); }
+  });
+});
