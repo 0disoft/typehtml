@@ -28,6 +28,8 @@ export interface Diagnostic {
   readonly scope: {
     readonly kind: 'selected-snapshot';
     readonly applicationCompleteness: 'not-evaluated';
+    readonly target?: string;
+    readonly activation?: string;
   };
   readonly note: string;
   readonly subcode?: string;
@@ -46,6 +48,22 @@ export interface CoverageRow {
   readonly actualStatus: AnalysisStatus;
   readonly evidenceRef: SourceLocation | null;
   readonly note: string;
+  readonly activation?: string;
+  readonly requiredBoundary?: boolean;
+}
+
+export interface SubmissionFact {
+  readonly artifact: { readonly path: string; readonly sha256: string; readonly sourceKind: string };
+  readonly intendedAction: FormCheck['action'];
+  readonly formId: string;
+  readonly formLocation: SourceLocation;
+  readonly context: { readonly documentUrl: string; readonly baseUrl: string; readonly executionAssumption: string; readonly hasScript: boolean };
+  readonly activation: string;
+  readonly submitterLocation: SourceLocation | null;
+  readonly rawAction: string | null;
+  readonly rawSubmitterAction: string | null;
+  readonly effectiveTarget: { readonly url: string; readonly method: string; readonly encoding: string; readonly skipValidation: boolean } | null;
+  readonly fields: readonly { readonly name: string; readonly possibleCount: number; readonly locations: readonly SourceLocation[] }[];
 }
 
 export interface DoctorReport {
@@ -62,6 +80,8 @@ export interface DoctorReport {
   };
   readonly findings: readonly Diagnostic[];
   readonly coverage: readonly CoverageRow[];
+  readonly submissions: readonly SubmissionFact[];
+  readonly findingsTruncated: boolean;
   readonly exitCode: 0 | 1 | 2 | 3;
   readonly error?: string;
 }
@@ -92,6 +112,8 @@ export interface DoctorConfig {
   readonly root: string;
   readonly inputs: readonly DoctorInputConfig[];
   readonly documents: readonly DoctorDocumentConfig[];
+  readonly releaseRequiresCompleteDeclaredBoundary: boolean;
+  readonly releaseRequiredRuleGroups: readonly CoverageRow['ruleGroup'][];
 }
 
 export interface LoadedDoctorConfig {
@@ -99,6 +121,7 @@ export interface LoadedDoctorConfig {
   readonly configPath: string;
   readonly baseDir: string;
   readonly formChecks: ReadonlyMap<string, FormCheck>;
+  readonly sourceIssues: ReadonlyMap<string, string>;
 }
 
 export function diagnosticError(

@@ -1,7 +1,8 @@
-import { readFile, realpath, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { open, realpath, stat } from 'node:fs/promises';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { readStrictJson } from '../contract/strict-json.ts';
-import { loadFormCheck } from '../contract/load.ts';
+import { loadBoundaryContract, loadFormCheck } from '../contract/load.ts';
+import { verifyFormCheckSource } from '../contract/project.ts';
 import type { JsonObject, JsonValue } from '../contract/strict-json.ts';
 import type { FormCheck } from '../contract/types.ts';
 import type {
@@ -10,6 +11,7 @@ import type {
   DoctorDocumentConfig,
   DoctorInputConfig,
   LoadedDoctorConfig,
+  CoverageRow,
 } from './types.ts';
 
 export const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
@@ -89,6 +91,7 @@ export async function loadDoctorConfig(configPath: string): Promise<LoadedDoctor
   });
   if (inputs.length === 0) throw new DoctorConfigError('CONFIG_INPUTS', 'at least one form projection is required');
   const formChecks = new Map<string, FormCheck>();
+  const sourceIssues = new Map<string, string>();
   let realBaseDir: string;
   try {
     realBaseDir = await realpath(baseDir);
@@ -104,6 +107,7 @@ export async function loadDoctorConfig(configPath: string): Promise<LoadedDoctor
       throw new DoctorConfigError('CONFIG_INPUT_UNREADABLE', error instanceof Error ? error.message : 'cannot read form projection');
     }
     withinRoot(realBaseDir, path);
+    if ((await stat(path)).size > MAX_DOCUMENT_BYTES) throw new DoctorConfigError('CONFIG_INPUT_TOO_LARGE', 'form projection exceeds the file size limit');
     let loaded;
     try {
       loaded = await loadFormCheck(path);
@@ -114,6 +118,16 @@ export async function loadDoctorConfig(configPath: string): Promise<LoadedDoctor
       throw new DoctorConfigError('CONFIG_DUPLICATE_ACTION', `duplicate form projection for ${loaded.formCheck.action.id}`);
     }
     formChecks.set(loaded.formCheck.action.id, loaded.formCheck);
+    try {
+      const sourcePath = withinRoot(baseDir, resolve(baseDir, loaded.formCheck.source.path));
+      const realSourcePath = await realpath(sourcePath);
+      withinRoot(realBaseDir, realSourcePath);
+      if ((await stat(realSourcePath)).size > MAX_DOCUMENT_BYTES) throw new Error('authoritative source exceeds the file size limit');
+      verifyFormCheckSource(loaded.formCheck, await loadBoundaryContract(realSourcePath));
+    } catch (error) {
+      if (error instanceof DoctorConfigError) throw error;
+      sourceIssues.set(loaded.formCheck.action.id, error instanceof Error ? error.message : 'authoritative source cannot be verified');
+    }
   }
   const documents = array(root.documents, '$.documents').map((item, index): DoctorDocumentConfig => {
     const entry = object(item, `$.documents[${index}]`);
@@ -153,13 +167,24 @@ export async function loadDoctorConfig(configPath: string): Promise<LoadedDoctor
   if (documents.every((document) => document.bindings.length === 0)) {
     throw new DoctorConfigError('CONFIG_ZERO_BINDINGS', 'explicit bindings are required');
   }
+  const audit = root.audit === undefined ? undefined : object(root.audit, '$.audit');
+  const allowedRuleGroups: readonly CoverageRow['ruleGroup'][] = ['binding', 'target', 'supply', 'cardinality', 'constraints', 'runtime-security', 'bypass'];
+  const requiredGroups = audit?.releaseRequiredRuleGroups === undefined
+    ? ['binding', 'target', 'supply', 'cardinality'] as const
+    : array(audit.releaseRequiredRuleGroups, '$.audit.releaseRequiredRuleGroups').map((item) => {
+      const name = string(item, '$.audit.releaseRequiredRuleGroups[]');
+      if (!allowedRuleGroups.includes(name as CoverageRow['ruleGroup'])) throw new DoctorConfigError('CONFIG_RULE_GROUP', `unknown required rule group ${name}`);
+      return name as CoverageRow['ruleGroup'];
+    });
   const config: DoctorConfig = {
     format: 'boundary-doctor/0.5-draft',
     root: rootPath,
     inputs,
     documents,
+    releaseRequiresCompleteDeclaredBoundary: boolean(audit?.releaseRequiresCompleteDeclaredBoundary ?? true, '$.audit.releaseRequiresCompleteDeclaredBoundary'),
+    releaseRequiredRuleGroups: requiredGroups,
   };
-  return { config, configPath: absoluteConfig, baseDir, formChecks };
+  return { config, configPath: absoluteConfig, baseDir, formChecks, sourceIssues };
 }
 
 export async function readConfiguredDocument(loaded: LoadedDoctorConfig, document: DoctorDocumentConfig): Promise<string> {
@@ -173,7 +198,19 @@ export async function readConfiguredDocument(loaded: LoadedDoctorConfig, documen
     if (info.size > MAX_DOCUMENT_BYTES) {
       throw new DoctorConfigError('CONFIG_DOCUMENT_TOO_LARGE', `document exceeds ${MAX_DOCUMENT_BYTES} bytes`);
     }
-    return await readFile(path, 'utf8');
+    const handle = await open(path, 'r');
+    try {
+      const bytes = Buffer.alloc(MAX_DOCUMENT_BYTES + 1);
+      let size = 0;
+      while (size < bytes.length) {
+        const result = await handle.read(bytes, size, bytes.length - size, null);
+        if (result.bytesRead === 0) break;
+        size += result.bytesRead;
+      }
+      if (size > MAX_DOCUMENT_BYTES) throw new DoctorConfigError('CONFIG_DOCUMENT_TOO_LARGE', `document exceeds ${MAX_DOCUMENT_BYTES} bytes`);
+      // Preserve a UTF-8 BOM in the decoded snapshot so re-encoding hashes the original bytes.
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes.subarray(0, size));
+    } finally { await handle.close(); }
   } catch (error) {
     if (error instanceof DoctorConfigError) throw error;
     throw new DoctorConfigError('CONFIG_DOCUMENT_UNREADABLE', error instanceof Error ? error.message : 'cannot read document');
