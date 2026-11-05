@@ -26,6 +26,7 @@ export class InMemoryActionRateLimiter implements ActionRateLimiter {
   private readonly maxBegins: number;
   private readonly maxKeys: number;
   private lastTime = 0;
+  private nextPruneCutoff = -Infinity;
 
   constructor(options: Readonly<{
     now?: () => number;
@@ -53,9 +54,12 @@ export class InMemoryActionRateLimiter implements ActionRateLimiter {
     const key = JSON.stringify([context.principal.tenantId, context.principal.subjectId, context.actionId]);
     let bucket = this.buckets.get(key);
     if (bucket === undefined) {
-      if (this.buckets.size >= this.maxKeys) {
+      if (this.buckets.size >= this.maxKeys && cutoff >= this.nextPruneCutoff) {
+        this.nextPruneCutoff = Infinity;
         for (const [candidateKey, candidate] of this.buckets) {
-          if ((candidate.posts.at(-1) ?? -Infinity) <= cutoff) this.buckets.delete(candidateKey);
+          const lastPost = candidate.posts.at(-1) ?? -Infinity;
+          if (lastPost <= cutoff) this.buckets.delete(candidateKey);
+          else this.nextPruneCutoff = Math.min(this.nextPruneCutoff, lastPost);
         }
       }
       if (this.buckets.size >= this.maxKeys) return { allow: false, retryAfterSeconds: 1 };
@@ -74,6 +78,8 @@ export class InMemoryActionRateLimiter implements ActionRateLimiter {
     }
     bucket.posts.push(now);
     if (context.phase === 'begin') bucket.begins.push(now);
+    // A lower bound stays safe when existing buckets receive newer posts.
+    this.nextPruneCutoff = Math.min(this.nextPruneCutoff, now);
     return { allow: true };
   }
 }
