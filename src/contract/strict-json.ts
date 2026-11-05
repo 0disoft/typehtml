@@ -347,24 +347,36 @@ export function decodeStrictJson(input: string | Uint8Array, options: StrictJson
   return new Parser(source, options.integerOnly ?? false, maxDepth).parse();
 }
 
-export async function readStrictJson(
+/** Read at most the JSON byte budget plus one byte, before decoding or hashing. */
+export async function readBoundedJsonBytes(
   path: string,
-  options: StrictJsonOptions = {},
-): Promise<JsonValue> {
+  maxBytes = DEFAULT_MAX_BYTES,
+): Promise<Uint8Array> {
   const { open } = await import("node:fs/promises");
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
     throw new TypeError("maxBytes must be a non-negative safe integer");
   }
   const handle = await open(path, "r");
   try {
     const buffer = Buffer.alloc(maxBytes + 1);
-    const result = await handle.read(buffer, 0, maxBytes + 1, 0);
-    if (result.bytesRead > maxBytes) {
+    let bytesRead = 0;
+    while (bytesRead < buffer.byteLength) {
+      const result = await handle.read(buffer, bytesRead, buffer.byteLength - bytesRead, bytesRead);
+      if (result.bytesRead === 0) break;
+      bytesRead += result.bytesRead;
+    }
+    if (bytesRead > maxBytes) {
       throw new StrictJsonError("JSON_TOO_LARGE");
     }
-    return decodeStrictJson(buffer.subarray(0, result.bytesRead), { ...options, maxBytes });
+    return buffer.subarray(0, bytesRead);
   } finally {
     await handle.close();
   }
+}
+
+export async function readStrictJson(
+  path: string,
+  options: StrictJsonOptions = {},
+): Promise<JsonValue> {
+  return decodeStrictJson(await readBoundedJsonBytes(path, options.maxBytes), options);
 }

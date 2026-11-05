@@ -4,7 +4,7 @@ import { readStrictJson } from '../../src/contract/strict-json.ts';
 import { loadBoundaryContract, loadFormCheck } from '../../src/contract/load.ts';
 import { computeBehaviorSha256 } from '../../src/contract/behavior.ts';
 import { projectFormCheck, projectStartFormCheck } from '../../src/contract/project.ts';
-import { ContractValidationError, validateBoundaryContract, validateFormCheck } from '../../src/contract/validate.ts';
+import { ContractValidationError, validateBoundaryContract, validateFieldSchema, validateFormCheck } from '../../src/contract/validate.ts';
 import type { JsonObject } from '../../src/contract/strict-json.ts';
 
 const design = new URL('../../docs/design/v0.5/', import.meta.url);
@@ -125,5 +125,31 @@ describe('boundary contract validation and projection', () => {
     changed.page.path = '/orders/newer';
     changed.headers.contentSecurityPolicy = "default-src 'none'";
     expect(computeBehaviorSha256(changed)).toBe(before);
+  });
+
+  test('checks literal string constraints using Unicode code points', () => {
+    expect(() => validateFieldSchema({ type: 'string', const: '😀', minLength: 1, maxLength: 1 })).not.toThrow();
+    expect(codeOf(() => validateFieldSchema({ type: 'string', const: '😀', minLength: 2 }))).toBe('OUT_OF_RANGE');
+    expect(codeOf(() => validateFieldSchema({ type: 'string', enum: ['too-long'], maxLength: 2 }))).toBe('OUT_OF_RANGE');
+    expect(codeOf(() => validateFieldSchema({ type: 'string', const: 'other', pattern: '^draft_[A-Za-z0-9_-]{1,58}$' }))).toBe('OUT_OF_RANGE');
+  });
+
+  test('rejects protocol fields that shadow business input in form-check documents', async () => {
+    const loaded = await loadFormCheck(generatedPath);
+    const bad = clone(loaded.value);
+    bad.protocolFields.push('quantity');
+    expect(codeOf(() => validateFormCheck(bad))).toBe('PROTOCOL_INPUT_CONFLICT');
+  });
+
+  test('requires one complete orderId path segment for receipt redirects', async () => {
+    const loaded = await loadBoundaryContract(contractPath);
+    for (const path of ['/orders/drafts', '/orders/:orderId/:orderId', '/orders/prefix:orderId', '/orders/:other/:orderId']) {
+      const bad = clone(loaded.value);
+      bad.response.receipt.path = path;
+      expect(codeOf(() => validateBoundaryContract(bad))).toBe('INVALID_TEMPLATE_PATH');
+    }
+    const bad = clone(loaded.value);
+    bad.output.schema.required = bad.output.schema.required.filter((key: string) => key !== 'orderId');
+    expect(codeOf(() => validateBoundaryContract(bad))).toBe('INVALID_VALUE');
   });
 });

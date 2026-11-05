@@ -5,3 +5,4 @@ export * from './behavior.ts';
 export * from './validate.ts';
 export * from './project.ts';
 export * from './load.ts';
+export * from './generate.ts';

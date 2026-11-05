@@ -1,6 +1,5 @@
-import { readFile } from 'node:fs/promises';
 import { computeBehaviorSha256, sourceSha256 as sourceHash } from './behavior.ts';
-import { decodeStrictJson, type JsonObject, type JsonValue } from './strict-json.ts';
+import { decodeStrictJson, readBoundedJsonBytes, type JsonObject, type JsonValue } from './strict-json.ts';
 import { validateBoundaryContract, validateFormCheck } from './validate.ts';
 import type {
   BoundaryContract,
@@ -17,8 +16,8 @@ function asObject(value: JsonValue): JsonObject {
 }
 
 export async function loadBoundaryContract(path: string): Promise<LoadedBoundaryContract> {
-  const bytes = await readFile(path);
-  const value = asObject(decodeStrictJson(bytes));
+  const bytes = await readBoundedJsonBytes(path);
+  const value = asObject(decodeStrictJson(bytes, { integerOnly: true }));
   const contract: BoundaryContract = validateBoundaryContract(value);
   return {
     contract,
@@ -29,8 +28,8 @@ export async function loadBoundaryContract(path: string): Promise<LoadedBoundary
 }
 
 export async function loadFormCheck(path: string): Promise<LoadedFormCheck> {
-  const bytes = await readFile(path);
-  const value = asObject(decodeStrictJson(bytes));
+  const bytes = await readBoundedJsonBytes(path);
+  const value = asObject(decodeStrictJson(bytes, { integerOnly: true }));
   const formCheck: FormCheck = validateFormCheck(value);
   return { formCheck, value };
 }

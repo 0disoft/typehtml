@@ -1,10 +1,12 @@
 import { computeBehaviorSha256 } from './behavior.ts';
+import { canonicalJson } from './canonical-json.ts';
 import type { JsonObject } from './strict-json.ts';
 import {
   FORM_CHECK_FORMAT,
   type BoundaryContract,
   type FormCheck,
   type InputContract,
+  type LoadedBoundaryContract,
   type ObjectSchema,
 } from './types.ts';
 
@@ -105,4 +107,32 @@ export function projectStartFormCheck(
     input,
     protocolFields: [contract.protocol.csrfField],
   };
+}
+
+/** Verify both freshness and the selected structural fields claimed by an exact projection. */
+export function verifyFormCheckSource(formCheck: FormCheck, source: LoadedBoundaryContract): void {
+  if (formCheck.source.sha256 !== source.sourceSha256) {
+    throw new ProjectionError('/source/sha256', 'form projection source bytes have changed');
+  }
+  if (formCheck.source.behaviorSha256 !== source.behaviorSha256) {
+    throw new ProjectionError('/source/behaviorSha256', 'form projection behavior digest does not match its source');
+  }
+  const options: ProjectionOptions = {
+    sourcePath: formCheck.source.path,
+    sourceSha256: source.sourceSha256,
+    generator: formCheck.source.generator,
+  };
+  const expected = formCheck.action.id === source.contract.id
+    ? projectFormCheck(source.contract, source.value, options)
+    : formCheck.action.id === `${source.contract.id}.begin`
+      ? projectStartFormCheck(source.contract, source.value, options)
+      : null;
+  if (expected === null) {
+    throw new ProjectionError('/action/id', 'form projection action does not belong to its source');
+  }
+  for (const field of ['action', 'input', 'protocolFields'] as const) {
+    if (canonicalJson(formCheck[field]) !== canonicalJson(expected[field])) {
+      throw new ProjectionError(`/${field}`, `form projection ${field} does not match its source`);
+    }
+  }
 }

@@ -226,7 +226,7 @@ function validateTemplatePath(value: unknown, path: string): string {
   return text;
 }
 
-function validateStringConstraints(obj: Obj, path: string, field: FieldSchema): void {
+function validateStringConstraints(obj: Obj, path: string): void {
   const minLength = obj.minLength === undefined ? undefined : expectNonNegativeInteger(obj.minLength, pointer(path, 'minLength'));
   const maxLength = obj.maxLength === undefined ? undefined : expectNonNegativeInteger(obj.maxLength, pointer(path, 'maxLength'));
   if (minLength !== undefined && maxLength !== undefined && minLength > maxLength) {
@@ -253,10 +253,20 @@ function validateStringConstraints(obj: Obj, path: string, field: FieldSchema): 
       fail('UNSUPPORTED_PATTERN', pointer(path, 'pattern'), `unsupported pattern: ${pattern}`);
     }
   }
+  for (const value of [constValue, ...(enumValues ?? [])]) {
+    if (value === undefined) continue;
+    const length = [...value].length;
+    if ((minLength !== undefined && length < minLength) || (maxLength !== undefined && length > maxLength)) {
+      fail('OUT_OF_RANGE', path, 'const or enum value is outside minLength/maxLength');
+    }
+    if (typeof obj.pattern === 'string' && !new RegExp(obj.pattern).test(value)) {
+      fail('OUT_OF_RANGE', path, 'const or enum value does not match pattern');
+    }
+  }
   assertOnlyKeys(obj, ['type', 'minLength', 'maxLength', 'const', 'enum', 'pattern'], path);
 }
 
-function validateIntegerConstraints(obj: Obj, path: string, field: FieldSchema): void {
+function validateIntegerConstraints(obj: Obj, path: string): void {
   const minimum = obj.minimum === undefined ? undefined : expectSafeInteger(obj.minimum, pointer(path, 'minimum'));
   const maximum = obj.maximum === undefined ? undefined : expectSafeInteger(obj.maximum, pointer(path, 'maximum'));
   if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
@@ -303,11 +313,11 @@ export function validateFieldSchema(value: unknown, path = '$'): FieldSchema {
   );
   const type = expectString(obj.type, pointer(path, 'type'));
   if (type === 'string') {
-    validateStringConstraints(obj, path, obj as unknown as FieldSchema);
+    validateStringConstraints(obj, path);
     return obj as unknown as FieldSchema;
   }
   if (type === 'integer') {
-    validateIntegerConstraints(obj, path, obj as unknown as FieldSchema);
+    validateIntegerConstraints(obj, path);
     return obj as unknown as FieldSchema;
   }
   fail('INVALID_VALUE', pointer(path, 'type'), 'supported types are string and integer');
@@ -640,6 +650,11 @@ function validateReceipt(value: unknown, path: string): BoundaryContract['respon
   );
   expectLiteral(obj.method, 'GET', pointer(path, 'method'));
   const receiptPath = validateCanonicalPath(obj.path, pointer(path, 'path'));
+  const segments = receiptPath.split('/');
+  if (segments.filter((segment) => segment === ':orderId').length !== 1 ||
+      segments.some((segment) => segment !== ':orderId' && /[:*{}]/.test(segment))) {
+    fail('INVALID_TEMPLATE_PATH', pointer(path, 'path'), 'receipt route must contain exactly one :orderId path segment and no other route parameters');
+  }
   expectLiteral(obj.load, 'loadReceipt', pointer(path, 'load'));
   expectLiteral(obj.authorize, 'authorizeReceipt', pointer(path, 'authorize'));
   expectLiteral(obj.project, 'projectReceipt', pointer(path, 'project'));
@@ -743,6 +758,9 @@ export function validateBoundaryContract(value: JsonValue): BoundaryContract {
     }
   }
   const response = validateResponse(obj.response, '/response');
+  if (!output.schema.required.includes('orderId') || output.schema.properties.orderId?.type !== 'string') {
+    fail('INVALID_VALUE', '/output/schema/properties/orderId', 'receipt redirect requires a required string orderId output');
+  }
   const headers = validateHeaders(obj.headers, '/headers');
   const operationRevision = expectPositiveInteger(obj.operationRevision, '/operationRevision');
   return {
@@ -824,6 +842,9 @@ export function validateFormCheck(value: JsonValue): FormCheck {
   for (let i = 0; i < protocolFields.length; i++) {
     if (!PROTOCOL_FIELD.test(protocolFields[i]!)) {
       fail('INVALID_ID', pointer('/protocolFields', i), 'expected a protocol field name');
+    }
+    if (Object.hasOwn(input.schema.properties, protocolFields[i]!)) {
+      fail('PROTOCOL_INPUT_CONFLICT', pointer('/protocolFields', i), 'protocol field is also an input');
     }
   }
   return {
