@@ -9,6 +9,13 @@
     "bun": ">=1.4.0"
   },
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "doctor": "bun src/cli.ts doctor"
+  },
+  "dependencies": {
+    "parse5": "^7"
+  },
+  "bin": {
+    "boundary": "src/cli.ts"
   }
 }
