@@ -41,6 +41,23 @@ function fieldErrors(errors: readonly string[] | undefined): string {
   return `<p class="field-error" role="alert">${errors.map((error) => escapeHtml(error)).join(', ')}</p>`;
 }
 
+export function renderLogin(message?: string): string {
+  return page(
+    '로그인',
+    `<h1>로그인</h1>
+${message === undefined ? '' : `<p role="alert">${escapeHtml(message)}</p>`}
+<form method="post" action="/login">
+<label for="tenantId">테넌트</label>
+<input id="tenantId" name="tenantId" autocomplete="organization" required>
+<label for="subjectId">사용자</label>
+<input id="subjectId" name="subjectId" autocomplete="username" required>
+<label for="password">비밀번호</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required>
+<button type="submit">로그인</button>
+</form>`,
+  );
+}
+
 export function renderStart(view: OrderPageView, csrfToken: string, beginPath: string): string {
   return page(
     '주문 시작',

@@ -9,55 +9,28 @@ import type { Principal } from '../../runtime/order.ts';
 import {
   renderErrorPage,
   renderForm,
+  renderLogin,
   renderReceipt,
   renderStart,
   type FormConstraints,
 } from '../../render/order-html.ts';
+import {
+  InMemorySessionStore,
+  SESSION_COOKIE,
+  type CredentialStore,
+  type Session,
+  type SessionStore,
+} from '../../runtime/session.ts';
 
-export const SESSION_COOKIE = 'bc_session';
-
-export type Session = Readonly<{
-  id: string;
-  principal: Principal;
-  csrfToken: string;
-}>;
-
-export interface SessionStore {
-  get(id: string): Session | null;
-  create(principal: Principal): Session;
-  rotate(id: string): Session | null;
-}
-
-export class InMemorySessionStore implements SessionStore {
-  private readonly sessions = new Map<string, Session>();
-
-  get(id: string): Session | null {
-    return this.sessions.get(id) ?? null;
-  }
-
-  create(principal: Principal): Session {
-    const session: Session = {
-      id: `sess_${crypto.randomUUID()}`,
-      principal,
-      csrfToken: `csrf_${crypto.randomUUID()}`,
-    };
-    this.sessions.set(session.id, session);
-    return session;
-  }
-
-  rotate(id: string): Session | null {
-    const current = this.sessions.get(id);
-    if (current === undefined) return null;
-    this.sessions.delete(id);
-    return this.create(current.principal);
-  }
-}
+export { InMemorySessionStore, SESSION_COOKIE };
+export type { Session, SessionStore };
 
 export type OrderAppOptions = Readonly<{
   loaded: LoadedBoundaryContract;
   coordinator: OrderCoordinator;
   sessions: SessionStore;
   allowedOrigins: readonly string[];
+  credentials?: CredentialStore;
   demo?: Readonly<{ principal: Principal; productId: string }>;
 }>;
 
@@ -96,9 +69,36 @@ export function createOrderApp(options: OrderAppOptions) {
   });
 
   app.get('/login', (c) => {
+    if (options.credentials !== undefined) return html(c, 200, renderLogin());
     const session = sessions.create(demo.principal);
     c.header('Set-Cookie', serializeSessionCookie(session.id));
     return c.redirect(`${contract.page.path}?productId=${encodeURIComponent(demo.productId)}`, 303);
+  });
+
+  app.post('/login', async (c) => {
+    assertAccept(c.req.raw);
+    assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
+    if (options.credentials === undefined) return html(c, 404, renderErrorPage(404, 'NOT_FOUND'));
+    const body = await c.req.parseBody();
+    const tenantId = body.tenantId;
+    const subjectId = body.subjectId;
+    const password = body.password;
+    if (typeof tenantId !== 'string' || typeof subjectId !== 'string' || typeof password !== 'string') {
+      return html(c, 400, renderLogin('아이디와 비밀번호를 입력해 주세요.'));
+    }
+    const principal = await options.credentials.verify(tenantId, subjectId, password);
+    if (principal === null) return html(c, 401, renderLogin('아이디 또는 비밀번호가 올바르지 않습니다.'));
+    const session = sessions.create(principal);
+    c.header('Set-Cookie', serializeSessionCookie(session.id));
+    return c.redirect(`${contract.page.path}?productId=${encodeURIComponent(demo.productId)}`, 303);
+  });
+
+  app.post('/logout', (c) => {
+    assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
+    const session = requireSession(c, sessions);
+    sessions.revoke?.(session.id);
+    c.header('Set-Cookie', clearSessionCookie());
+    return c.redirect('/login', 303);
   });
 
   app.get('/orders/new', (c) => {
@@ -232,6 +232,10 @@ function sessionFromRequest(request: Request, sessions: SessionStore): Session |
 
 function serializeSessionCookie(sessionId: string): string {
   return `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax`;
+}
+
+function clearSessionCookie(): string {
+  return `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`;
 }
 
 function assertAccept(request: Request): void {
