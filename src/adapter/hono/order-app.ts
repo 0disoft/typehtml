@@ -1,0 +1,245 @@
+import { Hono } from 'hono';
+import type { Context } from 'hono';
+import type { LoadedBoundaryContract } from '../../contract/types.ts';
+import { assertCsrfToken, CsrfError } from '../../runtime/csrf.ts';
+import { OrderFailure, type OrderCoordinator } from '../../runtime/order-coordinator.ts';
+import { formReadOptions, readUrlEncodedForm, WireError } from '../../runtime/wire.ts';
+import { acceptsHtml, assertRequestOrigin, NegotiationError } from '../../runtime/negotiation.ts';
+import type { Principal } from '../../runtime/order.ts';
+import {
+  renderErrorPage,
+  renderForm,
+  renderReceipt,
+  renderStart,
+  type FormConstraints,
+} from '../../render/order-html.ts';
+
+export const SESSION_COOKIE = 'bc_session';
+
+export type Session = Readonly<{
+  id: string;
+  principal: Principal;
+  csrfToken: string;
+}>;
+
+export interface SessionStore {
+  get(id: string): Session | null;
+  create(principal: Principal): Session;
+  rotate(id: string): Session | null;
+}
+
+export class InMemorySessionStore implements SessionStore {
+  private readonly sessions = new Map<string, Session>();
+
+  get(id: string): Session | null {
+    return this.sessions.get(id) ?? null;
+  }
+
+  create(principal: Principal): Session {
+    const session: Session = {
+      id: `sess_${crypto.randomUUID()}`,
+      principal,
+      csrfToken: `csrf_${crypto.randomUUID()}`,
+    };
+    this.sessions.set(session.id, session);
+    return session;
+  }
+
+  rotate(id: string): Session | null {
+    const current = this.sessions.get(id);
+    if (current === undefined) return null;
+    this.sessions.delete(id);
+    return this.create(current.principal);
+  }
+}
+
+export type OrderAppOptions = Readonly<{
+  loaded: LoadedBoundaryContract;
+  coordinator: OrderCoordinator;
+  sessions: SessionStore;
+  allowedOrigins: readonly string[];
+  demo?: Readonly<{ principal: Principal; productId: string }>;
+}>;
+
+type AppEnv = { Variables: { session: Session } };
+
+export function createOrderApp(options: OrderAppOptions) {
+  const { loaded, coordinator, sessions } = options;
+  const contract = loaded.contract;
+  const demo = options.demo ?? {
+    principal: { tenantId: 'tenant_1', subjectId: 'subject_1', sessionId: 'demo' },
+    productId: 'p_100',
+  };
+  const constraints = formConstraints(loaded);
+  const app = new Hono<AppEnv>();
+
+  app.use('*', async (c, next) => {
+    await next();
+    c.header('Cache-Control', contract.headers.cacheControl);
+    c.header('X-Content-Type-Options', contract.headers.xContentTypeOptions);
+    c.header('Referrer-Policy', contract.headers.referrerPolicy);
+    c.header('Content-Security-Policy', contract.headers.contentSecurityPolicy);
+    c.header('Content-Type', contract.headers.contentType);
+  });
+
+  app.onError((error, c) => {
+    if (error instanceof OrderFailure) {
+      if (error.status === 503 && error.retryAfterSeconds !== null) {
+        c.header('Retry-After', String(error.retryAfterSeconds));
+      }
+      return html(c, error.status, renderErrorPage(error.status, error.code));
+    }
+    if (error instanceof WireError) return html(c, error.status, renderErrorPage(error.status, error.code));
+    if (error instanceof NegotiationError) return html(c, error.status, renderErrorPage(error.status, error.code));
+    if (error instanceof CsrfError) return html(c, 403, renderErrorPage(403, error.code));
+    return html(c, 500, renderErrorPage(500, 'INTERNAL_ERROR'));
+  });
+
+  app.get('/login', (c) => {
+    const session = sessions.create(demo.principal);
+    c.header('Set-Cookie', serializeSessionCookie(session.id));
+    return c.redirect(`${contract.page.path}?productId=${encodeURIComponent(demo.productId)}`, 303);
+  });
+
+  app.get('/orders/new', (c) => {
+    assertAccept(c.req.raw);
+    const session = requireSession(c, sessions);
+    const intentId = c.req.query('intent');
+    if (intentId !== undefined) {
+      const page = coordinator.resolvePage(session.principal, { kind: 'intent', intentId });
+      if (page.kind === 'form') {
+        return html(
+          c,
+          200,
+          renderForm(
+            page.view,
+            {
+              rawValues: {},
+              fieldErrors: {},
+              formErrors: [],
+              csrfToken: session.csrfToken,
+              intentId,
+            },
+            contract.http.path,
+            constraints,
+          ),
+        );
+      }
+      if (page.kind === 'receipt') {
+        return c.redirect(`/orders/drafts/${encodeURIComponent(page.output.orderId)}`, 303);
+      }
+      if (page.kind === 'failure') {
+        return html(c, page.status, renderErrorPage(page.status, page.code));
+      }
+      return html(c, 500, renderErrorPage(500, 'INTERNAL_ERROR'));
+    }
+    const productId = c.req.query('productId');
+    if (productId === undefined) return html(c, 400, renderErrorPage(400, 'PRODUCT_REQUIRED'));
+    const page = coordinator.resolvePage(session.principal, { kind: 'product', productId });
+    if (page.kind === 'start') {
+      return html(c, 200, renderStart(page.view, session.csrfToken, contract.page.intentInitialization.path));
+    }
+    if (page.kind === 'failure') {
+      return html(c, page.status, renderErrorPage(page.status, page.code));
+    }
+    return html(c, 500, renderErrorPage(500, 'INTERNAL_ERROR'));
+  });
+
+  app.post(contract.page.intentInitialization.path, async (c) => {
+    assertAccept(c.req.raw);
+    assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
+    const session = requireSession(c, sessions);
+    const parsed = await readUrlEncodedForm(
+      c.req.raw,
+      formReadOptions(contract.http, contract.protocol, false),
+    );
+    assertCsrfToken(parsed.csrf, session.csrfToken);
+    const productId = parsed.fields.productId;
+    if (productId === undefined) throw new OrderFailure(400, 'PRODUCT_REQUIRED');
+    const result = await coordinator.beginDraft(session.principal, productId);
+    return c.redirect(result.location, 303);
+  });
+
+  app.post(contract.http.path, async (c) => {
+    assertAccept(c.req.raw);
+    assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
+    const session = requireSession(c, sessions);
+    const parsed = await readUrlEncodedForm(
+      c.req.raw,
+      formReadOptions(contract.http, contract.protocol, true),
+    );
+    assertCsrfToken(parsed.csrf, session.csrfToken);
+    const intentId = parsed.requestKey;
+    if (intentId === null) throw new OrderFailure(400, 'MISSING_REQUEST_KEY');
+    try {
+      const result = await coordinator.submitIntent(session.principal, intentId, parsed.fields);
+      return c.redirect(result.location, 303);
+    } catch (error) {
+      if (error instanceof OrderFailure && error.status === 422 && error.formState !== null) {
+        const page = coordinator.resolvePage(session.principal, { kind: 'intent', intentId });
+        if (page.kind !== 'form') throw error;
+        const state = { ...error.formState, csrfToken: session.csrfToken };
+        return html(c, 422, renderForm(page.view, state, contract.http.path, constraints));
+      }
+      throw error;
+    }
+  });
+
+  app.get(contract.response.receipt.path, (c) => {
+    assertAccept(c.req.raw);
+    const session = requireSession(c, sessions);
+    const orderId = c.req.param('orderId');
+    if (orderId === undefined) return html(c, 404, renderErrorPage(404, 'NOT_FOUND'));
+    try {
+      return html(c, 200, renderReceipt(coordinator.resolveReceipt(session.principal, orderId)));
+    } catch (error) {
+      if (error instanceof OrderFailure) return html(c, error.status, renderErrorPage(error.status, error.code));
+      throw error;
+    }
+  });
+
+  return app;
+}
+
+function formConstraints(loaded: LoadedBoundaryContract): FormConstraints {
+  const quantity = loaded.contract.input.schema.properties.quantity;
+  const productId = loaded.contract.input.schema.properties.productId;
+  return {
+    minQuantity: quantity !== undefined && quantity.type === 'integer' ? quantity.minimum ?? 1 : 1,
+    maxQuantity: quantity !== undefined && quantity.type === 'integer' ? quantity.maximum ?? 20 : 20,
+    productIdMaxLength: productId !== undefined && productId.type === 'string' ? productId.maxLength ?? 64 : 64,
+  };
+}
+
+function requireSession(c: Context<AppEnv>, sessions: SessionStore): Session {
+  const session = sessionFromRequest(c.req.raw, sessions);
+  if (session === null) throw new OrderFailure(401, 'UNAUTHENTICATED');
+  return session;
+}
+
+function sessionFromRequest(request: Request, sessions: SessionStore): Session | null {
+  const header = request.headers.get('cookie');
+  if (header === null) return null;
+  for (const part of header.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 0) continue;
+    if (part.slice(0, separator).trim() !== SESSION_COOKIE) continue;
+    const value = part.slice(separator + 1).trim();
+    return sessions.get(value);
+  }
+  return null;
+}
+
+function serializeSessionCookie(sessionId: string): string {
+  return `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax`;
+}
+
+function assertAccept(request: Request): void {
+  if (!acceptsHtml(request.headers.get('accept'))) {
+    throw new NegotiationError(406, 'NOT_ACCEPTABLE_HTML');
+  }
+}
+
+function html(c: Context<AppEnv>, status: number, body: string) {
+  return c.html(body, status as never);
+}

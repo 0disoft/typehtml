@@ -3,8 +3,12 @@ import { acceptsHtml, assertRequestOrigin, NegotiationError } from '../../src/ru
 
 const policy = { allowedOrigins: ['https://example.test'] };
 
-function request(headers: Record<string, string>): Request {
-  return new Request('https://example.test/actions/x', { method: 'POST', headers });
+function request(headers: Record<string, string | undefined>): Request {
+  const effective = new Headers();
+  for (const [name, value] of Object.entries(headers)) {
+    if (value !== undefined) effective.set(name, value);
+  }
+  return new Request('https://example.test/actions/x', { method: 'POST', headers: effective });
 }
 
 describe('Accept negotiation', () => {

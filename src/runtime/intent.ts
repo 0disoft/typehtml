@@ -27,15 +27,26 @@ export type IntentRequest =
   | Readonly<{ kind: 'view' }>
   | Readonly<{ kind: 'submit'; input: SubmissionInput }>;
 
+export type IntentErrorCode =
+  | 'INVALID_CLOCK'
+  | 'INTENT_UNAVAILABLE'
+  | 'NOT_FOUND'
+  | 'INTENT_STATE_INVALID'
+  | 'INTENT_EXPIRED'
+  | 'CONTRACT_CHANGED'
+  | 'QUOTE_CHANGED'
+  | 'COMPLETED_INPUT_CONFLICT'
+  | 'RESULT_EXPIRED';
+
 export type IntentDecision =
-  | Readonly<{ kind: 'error'; status: 404 | 409 | 410 | 500; code: string }>
+  | Readonly<{ kind: 'error'; status: 404 | 409 | 410 | 500; code: IntentErrorCode }>
   | Readonly<{ kind: 'form'; status: 200 }>
   | Readonly<{ kind: 'invalid'; status: 422 }>
   | Readonly<{ kind: 'receipt'; status: 303; orderId: string }>
   | Readonly<{ kind: 'needs-input' }>
   | Readonly<{ kind: 'write-candidate'; requires: 'fresh-immediate-policy-grant-cas' }>;
 
-const error = (status: 404 | 409 | 410 | 500, code: string): IntentDecision => ({ kind: 'error', status, code });
+const error = (status: 404 | 409 | 410 | 500, code: IntentErrorCode): IntentDecision => ({ kind: 'error', status, code });
 const epoch = (value: number): boolean => Number.isSafeInteger(value) && value >= 0;
 
 /** intent-state/2, copied from the design reference; inputs come from one scoped snapshot. */

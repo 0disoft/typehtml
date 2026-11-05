@@ -29,10 +29,14 @@ async function parse(
     ...(options.contentEncoding ? { 'content-encoding': options.contentEncoding } : {}),
     ...options.headers,
   };
+  const body =
+    typeof raw === 'string'
+      ? raw
+      : (raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer);
   const request = new Request('http://example.test/actions/orders/create-draft', {
     method: 'POST',
     headers,
-    body: typeof raw === 'string' ? raw : raw,
+    body,
   });
   return readUrlEncodedForm(request, formReadOptions(http, protocol, options.expectRequestKey ?? false));
 }

@@ -10,12 +10,18 @@
   },
   "scripts": {
     "test": "bun test",
+    "typecheck": "tsc --noEmit",
     "doctor": "bun src/cli.ts doctor"
   },
   "dependencies": {
+    "hono": "^4",
     "parse5": "^7"
   },
   "bin": {
     "boundary": "src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
   }
 }

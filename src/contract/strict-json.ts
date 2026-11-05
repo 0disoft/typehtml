@@ -167,6 +167,7 @@ class Parser {
     while (this.index < this.source.length) {
       const char = this.source[this.index];
       this.index += 1;
+      if (char === undefined) this.fail("unterminated string");
 
       if (char === '"') {
         assertNoLoneSurrogates(result);

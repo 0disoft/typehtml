@@ -1,15 +1,13 @@
 import { parse } from 'parse5';
 import type { DefaultTreeAdapterTypes } from 'parse5';
+import type { SourceLocation } from './types.ts';
 
 type P5Node = DefaultTreeAdapterTypes.Node;
 type P5Element = DefaultTreeAdapterTypes.Element;
 type P5Parent = DefaultTreeAdapterTypes.ParentNode;
 
-export interface SourceLocation {
-  readonly path: string;
-  readonly line: number;
-  readonly column: number;
-  readonly offset: number;
+function parentOf(node: P5Node): P5Parent | null {
+  return (node as { parentNode?: P5Parent | null }).parentNode ?? null;
 }
 
 export interface ControlFact {
@@ -122,7 +120,7 @@ function firstBaseUrl(documentUrl: string, elements: readonly P5Element[]): stri
 }
 
 function isDisabledByFieldset(control: P5Element): boolean {
-  let parent = control.parentNode;
+  let parent = parentOf(control);
   while (parent) {
     if (parent.nodeName === 'fieldset' && isElement(parent) && hasAttribute(parent, 'disabled')) {
       const firstLegend = parent.childNodes.find(
@@ -130,7 +128,7 @@ function isDisabledByFieldset(control: P5Element): boolean {
       );
       if (!firstLegend || !isInside(control, firstLegend)) return true;
     }
-    parent = parent.parentNode;
+    parent = parentOf(parent);
   }
   return false;
 }
@@ -145,10 +143,10 @@ function isInside(node: P5Node, ancestor: P5Node): boolean {
 }
 
 function nearestForm(element: P5Element): P5Element | null {
-  let parent = element.parentNode;
+  let parent = parentOf(element);
   while (parent) {
     if (parent.nodeName === 'form' && isElement(parent)) return parent;
-    parent = parent.parentNode;
+    parent = parentOf(parent);
   }
   return null;
 }
