@@ -6,7 +6,7 @@
 - 대상: `src/runtime/`, `src/adapter/sqlite/`, `src/adapter/hono/`, `src/render/`, `examples/order-app.ts`
 - 설계 기준: `docs/design/v0.5/`
 - 환경: Bun 1.4.4, TypeScript 7.0.2, SQLite(Bun 내장), Windows
-- 판정: **참조 구현 실행됨.** P0a/P0b 비교는 실제 대상 프로젝트가 없어 구현 목표에서 제외했고, 제품 적합성 주장으로 쓰지 않는다.
+- 판정: **참조 구현 실행됨.** P0a/P0b는 실제 대상이 없어 **판단 보류**다(`P0_DECISION.ko.md`). 제품 적합성 주장으로 쓰지 않는다.
 
 이 문서는 실행한 것과 실행하지 않은 것을 구분한다. P1 구현이 P0a/P0b의 B/L/S/D 비교를 대체하지 않는다.
 
@@ -14,7 +14,7 @@
 
 | 검사 | 명령 | 결과 |
 | --- | --- | --- |
-| 전체 테스트 | `bun test` | 93 pass, 0 fail, 272 expect, 16 files |
+| 전체 테스트 | `bun test` | 97 pass, 0 fail, 290 expect, 16 files |
 | 정적 타입 | `bun run typecheck` | exit 0 |
 | Doctor 설계 예제 | `cd docs/design/v0.5 && bun ../../../src/cli.ts doctor --config examples/doctor.config.json` | exit 0, findings 0, 3 documents / 3 forms / 3 bindings |
 | 주문 흐름 | `test/runtime/order-flow.test.ts` | start, begin, 422 재시도, 303, replay, 만료 410, revision 409, 영수증 보존 |
@@ -36,26 +36,26 @@
 | 대상 | 상태 | 근거·한계 |
 | --- | --- | --- |
 | 네이티브 응답 | 확인 | GET start, intent form, 정상 303, 영수증, 422와 같은 intent 수정을 Hono `app.request`, 실제 `Bun.serve` 소켓, 실제 브라우저로 확인 |
-| 조작 요청 | 부분 확인 | 미등록 key, 중복 entry, 잘못된 Origin, JSON Accept, 세션 없음, bad CSRF, 초과 스트림 413, 지수 422, malformed percent/UTF-8, encoded duplicate 확인. prefetch·start POST의 새 intent 수, exact expiry, consumed-without-result는 미실행 |
+| 조작 요청 | 확인 | 미등록 key, 중복 entry, 잘못된 Origin, JSON Accept, 세션 없음, bad CSRF, 초과 스트림 413, 지수 422, malformed percent/UTF-8, encoded duplicate, prefetch/HEAD/GET의 새 intent 0, begin POST 1, exact expiry 410, consumed-without-result 500 확인 |
 | 현재 권한 | 부분 확인 | membership 없음, 다른 tenant 상품 404, 비활성 상품, 영수증 권한 철회 404, 로컬 비밀번호 로그인·SQLite 세션·로그아웃 확인. 외부 IdP/OAuth와 계정 관리 화면은 범위 밖 |
-| DB 원자성 | 부분 확인 | CAS 0행 409, 초안 intent UNIQUE, 결과 FK, 정상 만료 rollback, SIGKILL 복구 확인. projection 실패 rollback은 별도 주입 미실행 |
-| 경합·복구 | 부분 확인 | 실제 두 연결 writer 경합과 503 예산, commit 뒤 응답 유실 replay, SQLite 백업 복구, 프로세스 강제 종료 후 rollback/commit 확인. 전원 장애 내구성은 미실행 |
+| DB 원자성 | 확인 | CAS 0행 409, 초안 intent UNIQUE, 결과 FK, 정상 만료 rollback, SIGKILL 복구, projection 실패 시 draft/consume/result/audit rollback 확인 |
+| 경합·복구 | 확인 | 실제 두 연결 writer 경합과 503 예산, commit 뒤 응답 유실 replay, SQLite 백업 복구, 프로세스 강제 종료 후 rollback/commit 확인. 설계 14번의 수용 조건은 충족하며 물리 전원 손실 내구성은 주장하지 않는다 |
 | intent 수명 | 부분 확인 | 만료 410, 결과 보존 410, 정리, replay, 다른 입력 409 확인. 복제 탭·새로고침의 실제 브라우저 동작은 미실행 |
 | 공개 화면 | 확인 | escaped product name, label/오류 연결, 실제 브라우저 키보드 제출, 접근성 트리 확인. 실제 스크린리더 낭독은 미실행 |
 
 ## 구현 목표에서 제외한 것
 
-- **P0a/P0b B/L/S/D 비교**: 실제 대상 프로젝트가 있어야 하는 설계 실험이고 코드 산출물이 아니다. 대상 프로젝트가 제공되지 않아 구현 목표에서 제외했다. 설계 09번도 대상 없이 임의 프로젝트를 만들어 비교 결과로 포장하지 말라고 명시한다. 비교 결과를 합성하지 않는다.
+- **P0a/P0b B/L/S/D 비교**: 실제 대상 프로젝트가 있어야 하는 설계 실험이다. 대상이 없어 `P0_DECISION.ko.md`에 **판단 보류**로 기록했다. 설계 09번도 대상 없이 임의 프로젝트를 만들어 비교 결과로 포장하지 말라고 명시한다.
 - **외부 IdP/OAuth, 다중 테넌트 계정 관리**: 로컬 SQLite 자격 증명·세션 저장소로 참조 구현을 닫았다. 실제 외부 인증 공급자 연동은 P1 참조 범위 밖이다.
 - **다중 인스턴스 운영 배포**: 두 앱 인스턴스가 같은 SQLite 세션·CSRF를 공유하는 것은 테스트했지만, 로드밸런서·sticky session·운영 세션 만료 정책은 범위 밖이다.
 - **실제 스크린리더 낭독**: 접근성 트리와 키보드 제출까지만 확인했다.
 - **전원 장애**: SIGKILL 프로세스 강제 종료로 WAL rollback/commit을 확인했다. 전원 손실 내구성은 주장하지 않는다. WAL + `synchronous=FULL` 설정은 유지한다.
 - **PostgreSQL 등 비동기 어댑터**: v0.5 참조 범위가 아니다.
 
-## 남은 미해결 (UNRESOLVED)
+## P0 판정과 범위 밖
 
-- **P0a/P0b**: 현재 워크스페이스에서 `<form`을 쓰는 HTML/JSX/Vue/Svelte 파일을 검색했으나 0건이었다. 실제 대상 프로젝트가 없고, 설계 09번이 임의 프로젝트 생성·비교 결과 포장을 금지하므로 실행하지 않았다. 통과가 아니라 미해결이다.
-- **전원 손실 내구성**: SIGKILL 프로세스 종료까지만 확인했다. 물리 전원 손실은 재현하지 않았고 내구성을 주장하지 않는다.
+- **P0a/P0b**: 워크스페이스에서 `<form`을 쓰는 HTML/HTM/TSX/JSX/Vue/Svelte/EJS/HBS/PHP/CSHTML/Razor/Astro 파일을 검색했으나 0건이었다. 실제 대상 프로젝트가 없어 설계 09·14번의 기준에 따라 **판단 보류**로 기록했다. 통과가 아니며, 비교 결과를 합성하지 않는다. 상세: `P0_DECISION.ko.md`.
+- **물리 전원 손실**: 설계 14번의 P1 경합·복구 수용 조건은 “commit 뒤 응답 유실”이며, 이는 replay 테스트로 확인했다. SIGKILL/WAL `synchronous=FULL`/`integrity_check=ok`까지만 확인했고, 물리 전원 손실 내구성은 설계 수용 조건이 아니므로 주장하지 않는다.
 
 ## 구현 편차
 
@@ -77,4 +77,4 @@ bun test test/adapter/session-store.test.ts
 bun test test/adapter/sqlite-crash.test.ts
 ```
 
-마지막 전체 실행 결과는 이 문서 작성 시점 기준 93 pass / 0 fail / 272 expect, typecheck exit 0이다.
+마지막 전체 실행 결과는 이 문서 작성 시점 기준 97 pass / 0 fail / 290 expect, typecheck exit 0이다.
