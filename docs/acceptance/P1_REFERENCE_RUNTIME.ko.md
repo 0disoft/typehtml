@@ -27,7 +27,7 @@
 | 응답 유실 | `test/adapter/sqlite-backup.test.ts` | commit 뒤 첫 응답을 잃은 상황에서 같은 intent 재요청이 같은 receipt Location을 반환 |
 | 백업·복구 | `test/adapter/sqlite-backup.test.ts` | `VACUUM INTO` 백업을 새 저장소로 열어 draft/result와 영수증 KRW 24000 복구 |
 | 프로세스 강제 종료 | `test/adapter/sqlite-crash.test.ts` | SIGKILL 시 미커밋 트랜잭션은 사라지고, 커밋된 행은 남으며 `integrity_check=ok` |
-| 로컬 마이크로벤치 | `bun run bench -- --iterations=200` | 200회 파일 SQLite 흐름: mean 2.253ms, p50 2.185ms, p95 3.465ms, 약 443/s. HTTP·세션 제외, 용량 주장 아님 |
+| 로컬 마이크로벤치 | `bun run bench -- --iterations=200` | 200회 파일 SQLite 흐름: elapsed 367.1ms, mean 1.833ms, p50 1.727ms, p95 2.979ms, max 5.128ms, 약 544.9/s. HTTP·세션 제외, 용량 주장 아님 |
 
 ## 설계 14번 P1 최소 수용 조건 대조
 
