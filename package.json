@@ -12,6 +12,8 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "doctor": "bun src/cli.ts doctor",
+    "generate": "bun src/cli.ts generate --contract docs/design/v0.5/examples/order.boundary.json --out-dir src/generated",
+    "generate:check": "bun run generate --check",
     "example": "bun examples/order-app.ts",
     "bench": "bun scripts/order-benchmark.ts"
   },
