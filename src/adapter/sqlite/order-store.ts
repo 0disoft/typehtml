@@ -431,6 +431,15 @@ class SqliteWriteTx extends SqliteReadTx implements OrderWriteTx {
   }
 }
 
+export type AuditFinding = Readonly<{
+  intentId: string;
+  reason:
+    | 'OPEN_WITH_DURABLE_WORK'
+    | 'CONSUMED_WITHOUT_RESULT'
+    | 'RESULT_METADATA_MISMATCH'
+    | 'DRAFT_SCOPE_MISMATCH';
+}>;
+
 export class SqliteOrderStore implements OrderStorage {
   private readonly db: Database;
   private readonly busyRetryBudgetMs: number;
@@ -560,6 +569,61 @@ export class SqliteOrderStore implements OrderStorage {
     this.db
       .query('UPDATE products SET revision = ?, price_minor = ? WHERE tenant_id = ? AND id = ?')
       .run(revision, priceMinor, tenantId, productId);
+  }
+
+  /** Bounded normal-retention cleanup. Inconsistent lifecycle rows are preserved. */
+  async cleanupExpired(now = this.now(), limit = 100): Promise<number> {
+    const bounded = Math.max(1, Math.min(100, Math.trunc(limit)));
+    return this.immediate(() => {
+      const result = this.db
+        .query(
+          `DELETE FROM form_intents
+            WHERE id IN (
+              SELECT i.id FROM form_intents AS i
+              LEFT JOIN action_results AS r ON r.intent_id = i.id
+              LEFT JOIN order_drafts AS d ON d.intent_id = i.id
+              WHERE (i.consumed_at IS NULL AND r.intent_id IS NULL AND d.id IS NULL
+                     AND i.expires_at <= ?)
+                 OR (i.consumed_at IS NOT NULL AND r.intent_id IS NOT NULL AND d.id = r.draft_id
+                     AND r.behavior_hash = i.behavior_hash AND r.completed_at = i.consumed_at
+                     AND d.tenant_id = i.tenant_id AND d.subject_id = i.subject_id
+                     AND d.product_id = i.product_id AND r.expires_at <= ?)
+              ORDER BY i.issued_at LIMIT ?
+            )`,
+        )
+        .run(now, now, bounded);
+      return result.changes;
+    });
+  }
+
+  /** Operator-only diagnostic; never surface these reasons in an unauthenticated response. */
+  auditInconsistencies(limit = 100): readonly AuditFinding[] {
+    const bounded = Math.max(1, Math.min(100, Math.trunc(limit)));
+    return this.read(() =>
+      this.db
+        .query(
+          `SELECT intent_id, reason FROM (
+             SELECT i.id AS intent_id,
+               CASE
+                 WHEN i.consumed_at IS NULL AND (r.intent_id IS NOT NULL OR d.id IS NOT NULL)
+                   THEN 'OPEN_WITH_DURABLE_WORK'
+                 WHEN i.consumed_at IS NOT NULL AND (r.intent_id IS NULL OR d.id IS NULL)
+                   THEN 'CONSUMED_WITHOUT_RESULT'
+                 WHEN r.intent_id IS NOT NULL AND (r.draft_id IS NOT d.id
+                   OR r.behavior_hash IS NOT i.behavior_hash OR r.completed_at IS NOT i.consumed_at)
+                   THEN 'RESULT_METADATA_MISMATCH'
+                 WHEN d.id IS NOT NULL AND (d.tenant_id IS NOT i.tenant_id
+                   OR d.subject_id IS NOT i.subject_id OR d.product_id IS NOT i.product_id)
+                   THEN 'DRAFT_SCOPE_MISMATCH'
+               END AS reason,
+               i.issued_at
+             FROM form_intents AS i
+             LEFT JOIN action_results AS r ON r.intent_id = i.id
+             LEFT JOIN order_drafts AS d ON d.intent_id = i.id
+           ) WHERE reason IS NOT NULL ORDER BY issued_at LIMIT ?`,
+        )
+        .all(bounded) as { intent_id: string; reason: AuditFinding['reason'] }[],
+    ).map((row) => ({ intentId: row.intent_id, reason: row.reason }));
   }
 
   close(): void {

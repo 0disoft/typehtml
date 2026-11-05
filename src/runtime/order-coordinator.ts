@@ -167,6 +167,11 @@ export class OrderCoordinator {
     if (draft === null) throw new OrderFailure(404, 'NOT_FOUND');
     const decision = assertSynchronous(this.bindings.authorizeReceipt({ principal, receipt: draft }));
     if (!decision.allow) throw new OrderFailure(404, 'NOT_FOUND');
+    const intent = tx.loadIntent(principal.tenantId, principal.subjectId, this.actionId, draft.intentId);
+    if (intent === null) throw new OrderFailure(410, 'RESULT_EXPIRED');
+    const result = tx.loadResult(draft.intentId);
+    if (result === null) throw new OrderFailure(500, 'INTENT_STATE_INVALID');
+    if (this.clock() >= result.expiresAt) throw new OrderFailure(410, 'RESULT_EXPIRED');
     const output = assertSynchronous(this.bindings.projectReceipt(draft));
     return this.validateReceipt(output);
   }
