@@ -1,0 +1,49 @@
+import { describe, expect, it } from 'bun:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { VERSION } from '../src/version.ts';
+
+const CLI = resolve(import.meta.dir, '../src/cli.ts');
+function cli(...args: string[]) {
+  const result = Bun.spawnSync([process.execPath, CLI, ...args]);
+  return { exitCode: result.exitCode, stdout: new TextDecoder().decode(result.stdout), stderr: new TextDecoder().decode(result.stderr) };
+}
+
+describe('TypeHTML CLI', () => {
+  it('provides a version and discoverable noninteractive commands', () => {
+    const version = cli('--version');
+    expect(version.exitCode).toBe(0);
+    expect(version.stdout.trim()).toBe(VERSION);
+    const help = cli('--help');
+    expect(help.exitCode).toBe(0);
+    expect(help.stdout).toContain('typehtml init <directory>');
+    expect(help.stdout).toContain('--form <file>');
+    expect(help.stdout).toContain('does not install dependencies');
+  });
+
+  it('rejects duplicate or unsupported options with one JSON error report', () => {
+    for (const args of [[], ['init'], ['init', 'app', '--package-manager', 'yarn'], ['init', 'a', 'b'], ['generate', '--form', 'a', '--contract', 'b', '--out-dir', 'out']]) {
+      const result = cli(...args);
+      expect(result.exitCode).toBe(2);
+      expect(JSON.parse(result.stdout).status).toBe('configuration-error');
+      expect(result.stderr).toBe('');
+    }
+  });
+
+  it('creates a standalone starter using paths containing spaces', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'typehtml-cli-init-'));
+    try {
+      const target = join(parent, 'app with spaces');
+      const result = cli('init', target, '--package-manager', 'npm');
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout).packageManager).toBe('npm');
+      expect(JSON.parse(await readFile(join(target, 'form.json'), 'utf8')).id).toBe('greeting.create');
+      const retry = cli('init', target);
+      expect(retry.exitCode).toBe(2);
+      expect(JSON.parse(retry.stdout).status).toBe('error');
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+});
