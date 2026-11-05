@@ -163,8 +163,13 @@ function successLocation(success: Readonly<{ location: string }>, origin: string
   if (success === null || typeof success !== 'object' || typeof success.location !== 'string') throw new TypeError('success must return a location');
   const location = success.location;
   const target = new URL(location, origin);
-  if (target.origin !== origin || !location.startsWith('/') || location.startsWith('//') || /[\r\n\\]/.test(location)) throw new TypeError('success location must be a same-origin absolute path');
-  return target.pathname + target.search + target.hash;
+  const normalized = target.pathname + target.search + target.hash;
+  // Dot-segment normalization can turn an absolute path into a network-path reference.
+  if (target.origin !== origin || !location.startsWith('/') || location.startsWith('//') ||
+      normalized.startsWith('//') || /[\r\n\\]/.test(location)) {
+    throw new TypeError('success location must be a same-origin absolute path');
+  }
+  return normalized;
 }
 
 function errorResponse(error: unknown, request: Request, onError: ((error: unknown, request: Request) => void) | undefined, receiver: unknown): Response {

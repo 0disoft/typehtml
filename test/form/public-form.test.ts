@@ -208,6 +208,44 @@ describe('public generic forms', () => {
     expect((await failure(request(valid))).status).toBe(409);
   });
 
+  it.each([
+    '/a/..//foreign.test/receipt',
+    '/.//foreign.test/receipt',
+    '/%2e//foreign.test/receipt',
+    '/a/%2E%2E//foreign.test/receipt',
+    '/a/..///foreign.test/receipt',
+    '/a/..//foreign.test:8443/receipt?x=1#done',
+    '/a/..//%66oreign.test/receipt',
+    '/a/..//localhost/receipt',
+  ])('rejects a success path that normalizes into a network-path redirect: %s', async (location) => {
+    const errors: unknown[] = [];
+    const handle = createFormHandler(form, {
+      ...options(), success: () => ({ location }), onError: (error) => { errors.push(error); },
+    });
+    const response = await handle(request(valid));
+    expect(response.status).toBe(500);
+    expect(response.headers.get('location')).toBeNull();
+    expect(await response.text()).toContain('INTERNAL_ERROR');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(TypeError);
+  });
+
+  it.each([
+    ['/', '/'],
+    ['/a/../thanks?x=1#done', '/thanks?x=1#done'],
+    ['/%2e/thanks', '/thanks'],
+    ['/a/%2e%2e/thanks', '/thanks'],
+    ['/thanks//receipt', '/thanks//receipt'],
+    ['/thanks?next=//foreign.test#//other.test', '/thanks?next=//foreign.test#//other.test'],
+    ['/%2f%2fforeign.test/receipt', '/%2f%2fforeign.test/receipt'],
+  ])('preserves a same-origin success path: %s', async (location, expected) => {
+    const handle = createFormHandler(form, { ...options(), success: () => ({ location }) });
+    const response = await handle(request(valid));
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(expected);
+    expect(new URL(response.headers.get('location')!, origin).origin).toBe(origin);
+  });
+
   it('passes verified protocol state to a custom invalid renderer', async () => {
     const handle = createFormHandler(form, { ...options(), invalid: ({ rawValues, issues, csrfToken, principal }) => {
       expect(rawValues.copies).toBe('100');
