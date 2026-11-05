@@ -1,0 +1,36 @@
+{
+  "status": "observed-reference-counterexamples",
+  "baseArchive": "typehtml-research-design-v0.4-2026-11-05.zip",
+  "records": [
+    {
+      "id": "V04-GENERIC-ASYNC",
+      "observed": "async execute accepted when Result is object",
+      "exitCode": 0,
+      "compiler": "Version 5.8.3",
+      "source": "import type { BindingRoleMap } from './reference/binding-roles.js';\nimport type { OrderTypes } from './reference/order-bindings.js';\ntype BroadResult = Omit<OrderTypes, 'Result'> & { Result: object };\nconst unexpectedAsync: BindingRoleMap<BroadResult>['execute'] = async () => ({ ok: true });\nvoid unexpectedAsync;\n",
+      "compilerOutput": "",
+      "scope": "compile-only counterexample, no callback run"
+    },
+    {
+      "id": "V04-PATH-SHAPE",
+      "metadataAcceptedNetworkPath": true,
+      "scope": "meta-schema acceptance, no server navigation"
+    },
+    {
+      "id": "V04-CLEANUP-EVIDENCE",
+      "orphanConsumedIntentRowsAfterCleanup": 0,
+      "scope": "single in-memory SQL example; consumed row lacked result before expiry"
+    },
+    {
+      "id": "V04-COVERAGE-ANCHOR",
+      "unmatchedTargets": [
+        "examples/html/form.initial.html#order-form",
+        "examples/html/form.initial.html#order-form",
+        "examples/html/form.initial.html#order-form"
+      ],
+      "actualConfiguredFormId": "create-draft",
+      "scope": "authored expectation consistency"
+    }
+  ],
+  "productFindings": false
+}

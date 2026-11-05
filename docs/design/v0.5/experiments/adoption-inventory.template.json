@@ -1,0 +1,43 @@
+{
+  "format": "boundary-adoption-inventory/0.3",
+  "status": "template-not-executed",
+  "project": null,
+  "sourceScope": null,
+  "sampleOrder": "route and file lexical order",
+  "maxSubmissionPaths": 10,
+  "totalDiscoveredForms": null,
+  "totalDiscoveredSubmissionPaths": null,
+  "inspectedSubmissionPaths": null,
+  "uninspectedPaths": null,
+  "schemaSources": null,
+  "existingCommands": null,
+  "rows": [],
+  "rowFields": [
+    "route",
+    "formSource",
+    "submitter",
+    "nativeOrEnhanced",
+    "encoding",
+    "schemaOrigin",
+    "schemaInputOrOutput",
+    "projectionExactOrPartial",
+    "customCodecs",
+    "arraysFilesConditions",
+    "eligibleAsIs",
+    "unsupportedReasons",
+    "responseMode",
+    "existingTypedHelper",
+    "observedIncidentOrChangeEvidence"
+  ],
+  "summary": {
+    "eligibleCount": null,
+    "unsupportedCount": null,
+    "unknownCount": null,
+    "adoptionWorkItems": null,
+    "realChangeFrequency": null,
+    "chosenFirstPath": null,
+    "conclusion": null
+  },
+  "expansionTrigger": "same blocker in two actual paths OR one user-confirmed release-blocking path; select one feature only",
+  "claimsAllowed": "sample-local fit only; not market demand or population incident rate"
+}

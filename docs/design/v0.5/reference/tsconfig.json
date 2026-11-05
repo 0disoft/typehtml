@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "strict": true,
+    "noEmit": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": false
+  },
+  "files": [
+    "binding-roles.ts",
+    "order-types.generated.ts",
+    "order-bindings.ts",
+    "type-rejection-cases.ts",
+    "wire-semantics.ts",
+    "intent-decisions.ts",
+    "sync-result.ts",
+    "native-target.ts"
+  ]
+}

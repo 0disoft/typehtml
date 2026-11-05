@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>입력값을 확인해 주세요</title></head>
+<body><main><h1>입력값을 확인해 주세요</h1><section aria-labelledby="errors-title"><h2 id="errors-title">수정할 항목</h2><p><a href="#quantity">수량을 1부터 20까지 입력하세요.</a></p></section>
+<p>합성 화면 예제이며 실제 주문이나 인증은 실행되지 않습니다.</p>
+<form id="create-draft" method="post" action="/actions/orders/create-draft" enctype="application/x-www-form-urlencoded" accept-charset="UTF-8">
+<input type="hidden" name="_bc_csrf" value="DEMO_ONLY_SESSION_CSRF">
+<input type="hidden" name="_bc_request" value="DEMO_ONLY_SERVER_ISSUED_INTENT">
+<input type="hidden" name="productId" value="p_100">
+<p>예제 상품 · 확인한 단가 12,000원 · 상품 버전 7</p>
+<label for="quantity">수량</label>
+<p id="quantity-hint">1부터 20까지의 정수를 입력하세요. 지수·소수 표기는 사용할 수 없습니다.</p>
+<input id="quantity" name="quantity" type="text" inputmode="numeric" pattern="([1-9]|1[0-9]|20)" maxlength="2" required value="21" aria-describedby="quantity-hint quantity-error" aria-invalid="true">
+<p id="quantity-error">수량은 1부터 20까지 입력해야 합니다.</p><button type="submit">주문 초안 만들기</button>
+</form></main></body></html>

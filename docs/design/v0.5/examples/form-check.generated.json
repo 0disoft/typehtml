@@ -1,0 +1,58 @@
+{
+  "format": "boundary-form-check/0.2-draft",
+  "status": "generated-design-reference-not-product-output",
+  "source": {
+    "path": "examples/order.boundary.json",
+    "sha256": "8d28473d4cc7141575930268c4843ea6e487ff560d379e206c38b1512050cf4e",
+    "generator": "validation/generate_reference_types.py",
+    "projection": "exact-for-selected-structural-fields",
+    "runtimeCoverage": "not-evaluated",
+    "behaviorSha256": "54f41ad4f93d68a25db8148f355e0dd6becc6db23005c24e93930d9b847e0c66"
+  },
+  "action": {
+    "id": "orders.createDraft",
+    "method": "POST",
+    "path": "/actions/orders/create-draft",
+    "encoding": "urlencoded",
+    "parserProfile": "strict-urlencoded-utf8/1"
+  },
+  "input": {
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "productId",
+        "quantity"
+      ],
+      "properties": {
+        "productId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      }
+    },
+    "codecs": {
+      "productId": "text",
+      "quantity": "decimal-integer"
+    },
+    "unknownKeys": "reject",
+    "duplicateScalars": "reject",
+    "scalarSemantics": {
+      "missing": "absent",
+      "emptyString": "preserve",
+      "textNormalization": "none",
+      "schemaStringLength": "unicode-code-points",
+      "validationMutatesData": false
+    }
+  },
+  "protocolFields": [
+    "_bc_csrf",
+    "_bc_request"
+  ]
+}

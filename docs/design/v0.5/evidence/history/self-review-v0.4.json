@@ -1,0 +1,123 @@
+{
+  "revision": "0.4.0-design",
+  "method": "read prior archive; compare primary sources; bounded reference observations",
+  "items": [
+    {
+      "id": "S01",
+      "finding": "form owner와 successful entry 의미가 구현에 충분히 지정되지 않음",
+      "document": "docs/05_HTML_FORMS_AND_RESPONSES.ko.md",
+      "sources": [
+        "R06",
+        "R36"
+      ],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S02",
+      "finding": "유효 action으로만 찾으면 잘못된 폼이 분석에서 사라짐",
+      "document": "docs/08_DOCTOR_AND_DIAGNOSTICS.ko.md",
+      "sources": [
+        "R06",
+        "R37"
+      ],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S03",
+      "finding": "확실성과 심각도가 섞여 UI 차이를 과도하게 차단할 위험",
+      "document": "docs/08_DOCTOR_AND_DIAGNOSTICS.ko.md",
+      "sources": [
+        "R07",
+        "R39"
+      ],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S04",
+      "finding": "wire parser와 Unicode·빈 값·hash 의미가 일치하지 않음",
+      "document": "docs/03_CONTRACT_AND_SINGLE_SOURCE.ko.md",
+      "sources": [
+        "R38",
+        "R39"
+      ],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S05",
+      "finding": "GET의 intent 생성이 자동 탐색에도 상태를 생성함",
+      "document": "docs/05_HTML_FORMS_AND_RESPONSES.ko.md",
+      "sources": [
+        "R40",
+        "R01"
+      ],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S06",
+      "finding": "새로 읽은 revision의 CAS만으로 화면에서 본 가격을 고정하지 못함",
+      "document": "docs/07_SQLITE_IDEMPOTENCY.ko.md",
+      "sources": [],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S07",
+      "finding": "원문 hash와 업무 호환성 hash를 동일하게 취급함",
+      "document": "docs/03_CONTRACT_AND_SINGLE_SOURCE.ko.md",
+      "sources": [],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S08",
+      "finding": "옛 intent를 새 schema로 먼저 검사하면 복구 오류 경로가 모호함",
+      "document": "docs/06_RUNTIME_SECURITY.ko.md",
+      "sources": [],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S09",
+      "finding": "결과 기록과 실제 초안의 연결·중복 제약을 보강할 필요",
+      "document": "docs/07_SQLITE_IDEMPOTENCY.ko.md",
+      "sources": [
+        "R08"
+      ],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S10",
+      "finding": "SQLite binding·durability·commit 실패의 처리 규약 누락",
+      "document": "docs/07_SQLITE_IDEMPOTENCY.ko.md",
+      "sources": [
+        "R08",
+        "R10",
+        "R11"
+      ],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S11",
+      "finding": "스냅샷 evidence·규칙별 gap·억제 정책이 불명확",
+      "document": "docs/08_DOCTOR_AND_DIAGNOSTICS.ko.md",
+      "sources": [],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    },
+    {
+      "id": "S12",
+      "finding": "규약을 확인하는 작은 실행 자료와 실제 제품 실험의 구분 필요",
+      "document": "docs/14_ACCEPTANCE_AND_EVIDENCE.ko.md",
+      "sources": [],
+      "decision": "adopted-design-change",
+      "productVerified": false
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "status": "authored-expectation-not-scanner-output",
+  "format": "boundary-diagnostic-attribution/0.5-draft",
+  "findings": [
+    {
+      "ruleId": "BC003",
+      "engineOrigin": "tsc",
+      "originalRuleId": "original-tsc-code-from-actual-run",
+      "causeKey": "orders.createDraft/binding/required-authorize",
+      "stage": "typecheck",
+      "certainty": "confirmed",
+      "evidenceRef": null,
+      "comparativeValue": "not-evaluated",
+      "note": "형식 예시. 기존 타입 진단을 보여주는 경우 공로는 tsc에 남는다.",
+      "samplePayloadOnly": true,
+      "severity": "error",
+      "ruleStatus": "NOT_RUN",
+      "scope": {
+        "kind": "selected-snapshot",
+        "applicationCompleteness": "not-evaluated"
+      }
+    },
+    {
+      "ruleId": "BC021",
+      "engineOrigin": "markuplint",
+      "originalRuleId": "require-accessible-name",
+      "causeKey": "orders.createDraft/form/quantity-accessible-name",
+      "stage": "static-form",
+      "certainty": "confirmed",
+      "evidenceRef": null,
+      "comparativeValue": "not-evaluated",
+      "note": "실제 실행 전이므로 confirmed는 예시 payload의 값이고 확인된 앱 결함이 아니다.",
+      "samplePayloadOnly": true,
+      "severity": "error",
+      "ruleStatus": "NOT_RUN",
+      "scope": {
+        "kind": "selected-snapshot",
+        "applicationCompleteness": "not-evaluated"
+      }
+    },
+    {
+      "ruleId": "BC010",
+      "engineOrigin": "boundary",
+      "originalRuleId": "missing-required-field",
+      "causeKey": "orders.createDraft/native/referenceNote-missing",
+      "stage": "static-form",
+      "certainty": "confirmed",
+      "evidenceRef": null,
+      "comparativeValue": "not-evaluated",
+      "note": "S와 L 실행 전에는 추가 발견인지 모른다.",
+      "samplePayloadOnly": true,
+      "severity": "error",
+      "ruleStatus": "NOT_RUN",
+      "scope": {
+        "kind": "selected-snapshot",
+        "applicationCompleteness": "not-evaluated"
+      }
+    },
+    {
+      "ruleId": "BC013",
+      "engineOrigin": "boundary",
+      "originalRuleId": "known-constraint-witness",
+      "causeKey": "orders.createDraft/quantity/max-witness",
+      "stage": "static-form",
+      "certainty": "confirmed",
+      "severity": "warning",
+      "ruleStatus": "NOT_RUN",
+      "samplePayloadOnly": true,
+      "evidenceRef": null,
+      "comparativeValue": "not-evaluated",
+      "scope": {
+        "kind": "selected-snapshot",
+        "applicationCompleteness": "not-evaluated"
+      },
+      "witness": {
+        "rawValue": "11",
+        "codecValue": 11,
+        "hypotheticalServerMaximum": 10,
+        "unchangedHtmlMaximum": 20
+      },
+      "note": "지원된 의미에서 구체적 차이가 있다는 예시다. 서버 검증을 유지하며 기본 CI 실패 대상으로 승격하지 않는다."
+    }
+  ],
+  "productRun": false
+}

@@ -1,0 +1,42 @@
+{
+  "status": "authored-expectation-not-scanner-output",
+  "format": "boundary-coverage/0.5-draft",
+  "productRun": false,
+  "actualCounts": null,
+  "overall": "NOT_EVALUATED",
+  "rows": [
+    {
+      "target": "examples/html/form.initial.html#create-draft",
+      "ruleGroup": "supply",
+      "illustrativeStatus": "supported",
+      "actualStatus": "NOT_RUN",
+      "evidenceRef": null,
+      "note": "정적 snapshot의 선택 폼에 대한 형식 예시다. 앱 전체의 모든 렌더 상태를 포함하지 않는다."
+    },
+    {
+      "target": "examples/html/form.initial.html#create-draft",
+      "ruleGroup": "constraints",
+      "illustrativeStatus": "partial",
+      "actualStatus": "NOT_RUN",
+      "evidenceRef": null,
+      "note": "열거된 witness만 확인하며 임의 regex 동등성은 평가하지 않는다."
+    },
+    {
+      "target": "examples/html/form.initial.html#create-draft",
+      "ruleGroup": "runtime-security",
+      "illustrativeStatus": "not-evaluated",
+      "actualStatus": "NOT_RUN",
+      "evidenceRef": null,
+      "note": "검사 전용 projection은 CSRF·인증·권한·트랜잭션 증거를 제공하지 않는다."
+    },
+    {
+      "target": "unprovided-application-route-graph",
+      "ruleGroup": "bypass",
+      "illustrativeStatus": "not-evaluated",
+      "actualStatus": "NOT_RUN",
+      "evidenceRef": null,
+      "note": "소스 앱을 전달받거나 조사하지 않았다. route 개수·경로를 지어내지 않는다."
+    }
+  ],
+  "suppressionPolicy": "suppressed findings remain in inventory; never become supported coverage"
+}

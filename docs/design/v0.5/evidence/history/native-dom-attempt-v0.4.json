@@ -1,0 +1,15 @@
+{
+  "classification": "NATIVE_DOM_REFERENCE_ATTEMPT",
+  "status": "BLOCKED_BEFORE_CASE_EXECUTION",
+  "attemptDate": "2026-11-05",
+  "tool": "Playwright with installed Chromium",
+  "entryUrl": "https://example.invalid/orders/new?intent=DEMO",
+  "error": "Page.goto: net::ERR_BLOCKED_BY_ADMINISTRATOR",
+  "plannedCaseCount": 16,
+  "executedCaseCount": 0,
+  "cases": [],
+  "browserVersionObserved": null,
+  "environmentPolicyBypassAttempted": false,
+  "scope": "Initial navigation was blocked. No browser case result or cross-browser claim is available.",
+  "productRun": false
+}

@@ -1,0 +1,350 @@
+{
+  "version": "0.3.0-design",
+  "items": [
+    {
+      "id": "F01",
+      "feedback": "이름과 HTML 가치 불일치",
+      "decision": "채택",
+      "resolution": "Boundary Contracts 작업명으로 변경하고 폼 구조·오류 연결의 좁은 HTML 검사는 유지한다.",
+      "document": "docs/01_DECISION_AND_SCOPE.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F02",
+      "feedback": "생성기 비교가 구현보다 늦음",
+      "decision": "채택",
+      "resolution": "P0에서 W와 WD를 먼저 비교한다. 생성기는 P3 조건부 실험이다.",
+      "document": "docs/09_DELIVERY_AND_EXPERIMENTS.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F03",
+      "feedback": "라벨 대수가 v0.1보다 앞섬",
+      "decision": "채택",
+      "resolution": "OriginSet·ValidationEvidence·GrantScope·Audience 대수는 core 계약에서 제거하고 연구 문서로 옮겼다.",
+      "document": "docs/06_RUNTIME_SECURITY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F04",
+      "feedback": "향상 제출은 항상 multipart",
+      "decision": "수정 채택",
+      "resolution": "FormData 직접 fetch와 SvelteKit의 enctype 분기를 구분한다. 초기 지원은 native HTML이며 프레임워크 응답 프로토콜도 별도로 다룬다.",
+      "document": "docs/05_HTML_FORMS_AND_RESPONSES.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F05",
+      "feedback": "수량 number와 엄격 codec의 불일치",
+      "decision": "채택",
+      "resolution": "text·inputmode=numeric·범위에 맞는 pattern을 기본으로 고정한다. 서버 codec 검증도 유지한다.",
+      "document": "docs/05_HTML_FORMS_AND_RESPONSES.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F06",
+      "feedback": "privilegedFields가 ownerId를 놓침",
+      "decision": "수정 채택",
+      "resolution": "실제 거부 근거는 schema 허용 목록이다. 민감 이름 목록·패턴은 설정 가능한 warning이다.",
+      "document": "docs/03_CONTRACT_AND_SINGLE_SOURCE.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F07",
+      "feedback": "첫 DB·구현 비용이 공백",
+      "decision": "채택",
+      "resolution": "Bun SQLite 단일 호스트를 선택하고 sync transaction·CAS·결과 보존·운영 의존성을 분리했다. 시간·금액 추정치는 만들지 않는다.",
+      "document": "docs/07_SQLITE_IDEMPOTENCY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F08",
+      "feedback": "통과 표가 제품 검증처럼 읽힘",
+      "decision": "채택",
+      "resolution": "artifact·reference type·SQL illustration과 제품 HTTP·브라우저·성능 미실행을 구분한다.",
+      "document": "docs/14_ACCEPTANCE_AND_EVIDENCE.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F09",
+      "feedback": "JSON과 TS 이중 정본·tsc 미실행",
+      "decision": "채택",
+      "resolution": "JSON 정본 하나와 파생 타입만 남기고 실제 tsc 및 의도한 타입 거부 사례를 기록했다.",
+      "document": "docs/03_CONTRACT_AND_SINGLE_SOURCE.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F10",
+      "feedback": "과거 AI 논쟁 정정 문서가 노이즈",
+      "decision": "채택",
+      "resolution": "독립 18번 문서를 제거하고 ADR-012 한 항목으로 정리한다.",
+      "document": "docs/11_ADR_AND_FEEDBACK.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F11",
+      "feedback": "바인딩 역할 계약 누락",
+      "decision": "채택",
+      "resolution": "Input·Principal·Resource·Result·Output·PageView·Receipt·Tx와 역할 시그니처를 정의한다.",
+      "document": "docs/04_BINDING_TYPES.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F12",
+      "feedback": "303·422·영수증 GET 계약 누락",
+      "decision": "채택",
+      "resolution": "response·page·receipt 역할을 계약과 예제에 일치시켰다.",
+      "document": "docs/05_HTML_FORMS_AND_RESPONSES.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F13",
+      "feedback": "thtml view 모델 없음",
+      "decision": "채택",
+      "resolution": "초기 문법을 제외하고 page viewSchema와 typed renderer로 실제 예제를 연결한다.",
+      "document": "docs/04_BINDING_TYPES.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F14",
+      "feedback": "execute 우회·동적 라우트 탐지 없음",
+      "decision": "채택",
+      "resolution": "심볼·조립 모듈·route 인벤토리와 unknown gap을 doctor 설계에 추가했다.",
+      "document": "docs/08_DOCTOR_AND_DIAGNOSTICS.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F15",
+      "feedback": "우회 스캔은 비용이 작음",
+      "decision": "수정 채택",
+      "resolution": "정적 부분집합을 우선한다. 임의 alias·동적 import·직접 DB 변경의 완전 추적은 약속하지 않는다.",
+      "document": "docs/08_DOCTOR_AND_DIAGNOSTICS.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F16",
+      "feedback": "기존 Zod·TypeBox 스키마 중복",
+      "decision": "범위 축소 채택",
+      "resolution": "첫 지원을 JSON Schema 정본으로 제한한다. 후속 exporter의 정본·실행 허용·partial 의미를 정의한다.",
+      "document": "docs/03_CONTRACT_AND_SINGLE_SOURCE.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F17",
+      "feedback": "Origin 없음·null·Fetch Metadata",
+      "decision": "채택",
+      "resolution": "정확한 origin과 Referer fallback, 세션 token, 없는 헤더의 정책을 표로 고정했다.",
+      "document": "docs/06_RUNTIME_SECURITY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F18",
+      "feedback": "외부 I/O가 잠금을 늘림",
+      "decision": "채택",
+      "resolution": "쓰기 transaction callback은 동기·DB 내부 작업만 허용한다. 외부 작업은 별도 단계다.",
+      "document": "docs/07_SQLITE_IDEMPOTENCY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F19",
+      "feedback": "프로토타입 오염·예약 키",
+      "decision": "채택",
+      "resolution": "Map/null-prototype·own property·위험 키·예약 prefix·미등록 키 거부를 명시했다.",
+      "document": "docs/06_RUNTIME_SECURITY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F20",
+      "feedback": "존재 오라클",
+      "decision": "채택",
+      "resolution": "조직 범위 조회와 동일한 404 안내를 사용한다. 상수시간은 주장하지 않는다.",
+      "document": "docs/06_RUNTIME_SECURITY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F21",
+      "feedback": "멱등성 키 생성·멀티탭·경합·정리",
+      "decision": "채택",
+      "resolution": "서버 intent·안정 URL·소비 표식·24시간 보존·잠금 재시도·작은 정리 batch를 정했다.",
+      "document": "docs/07_SQLITE_IDEMPOTENCY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F22",
+      "feedback": "CSRF 회전·멀티탭·세션 결합",
+      "decision": "채택",
+      "resolution": "세션 epoch별 토큰과 인증 상태 변화 시 무효화를 고정한다.",
+      "document": "docs/06_RUNTIME_SECURITY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F23",
+      "feedback": "revision 값만 있고 실제 CAS 없음",
+      "decision": "채택",
+      "resolution": "required-cas와 INSERT SELECT revision 조건·영향 행 수 1을 정의했다.",
+      "document": "docs/07_SQLITE_IDEMPOTENCY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F24",
+      "feedback": "entry 한도·길이·chunked 불명확",
+      "decision": "채택",
+      "resolution": "예약 필드를 포함한 entry 한도와 실제 스트림 byte 한도를 정의했다.",
+      "document": "docs/06_RUNTIME_SECURITY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F25",
+      "feedback": "rate limit·감사 로그 없음",
+      "decision": "채택",
+      "resolution": "두 제한 hook과 성공 감사의 원자적 저장, 로그의 민감정보 배제를 정했다.",
+      "document": "docs/06_RUNTIME_SECURITY.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F26",
+      "feedback": "OriginSet·Audience가 core 계약에 남음",
+      "decision": "채택",
+      "resolution": "신판 JSON과 파생 타입에서 제거했다.",
+      "document": "docs/03_CONTRACT_AND_SINGLE_SOURCE.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F27",
+      "feedback": "래퍼를 baseline 대신 기본 제품으로",
+      "decision": "채택",
+      "resolution": "wrapper+doctor만으로 출시하는 경로를 기본값으로 둔다.",
+      "document": "docs/01_DECISION_AND_SCOPE.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F28",
+      "feedback": "생성 LOC 대신 전체 유지 비용",
+      "decision": "채택",
+      "resolution": "수동 파일·연결 위치·전체 artifact·발견 단계·오탐·unknown을 기록한다.",
+      "document": "docs/09_DELIVERY_AND_EXPERIMENTS.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F29",
+      "feedback": "th 접두사는 Thymeleaf와 충돌",
+      "decision": "채택",
+      "resolution": "th:* 및 thtml을 core에서 제거한다. 새 prefix를 성급하게 정하지 않는다.",
+      "document": "docs/10_ARCHITECTURE_AND_TOOLCHAIN.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F30",
+      "feedback": "스코프·리스크·시장성 반복",
+      "decision": "채택",
+      "resolution": "결정·조사·ADR에 역할을 나누고 구판18개 핵심 문서를 신판15개로 통합한다.",
+      "document": "docs/11_ADR_AND_FEEDBACK.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F31",
+      "feedback": "unknown·신뢰 코드·수치 폐기·중단 조건 유지",
+      "decision": "유지",
+      "resolution": "unknown 분리, TCB 목록, null 실험 결과, 중단·축소 경로를 유지한다.",
+      "document": "docs/14_ACCEPTANCE_AND_EVIDENCE.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F32",
+      "feedback": "접근성과 시맨틱 빌드 오류",
+      "decision": "범위 제한 채택",
+      "resolution": "forms-strict에서 확정 구조·label·오류 연결 결함을 차단한다. 기존 엔진을 재사용하고 완전 접근성 보장은 하지 않는다.",
+      "document": "docs/05_HTML_FORMS_AND_RESPONSES.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F33",
+      "feedback": "AOT만 생성기의 이득",
+      "decision": "수정 채택",
+      "resolution": "AOT 외에 반복 연결 제거 가능성은 남기되 실험으로 확인한다. AOT 자체는 기존 Ajv 기능과 별도로 비교한다.",
+      "document": "docs/09_DELIVERY_AND_EXPERIMENTS.ko.md",
+      "introducedIn": "0.2.0-design"
+    },
+    {
+      "id": "F34",
+      "feedback": "Doctor의 고유 가치가 핵심 리스크",
+      "decision": "채택",
+      "resolution": "B/L/S/D로 기준선을 확대하고 같은 시점의 추가 발견·발견 시점·편의 가치를 분리한다.",
+      "document": "docs/09_DELIVERY_AND_EXPERIMENTS.ko.md",
+      "introducedIn": "0.3.0-design"
+    },
+    {
+      "id": "F35",
+      "feedback": "정책 과제 C2는 tsc 영역",
+      "decision": "채택",
+      "resolution": "구판 C2를 N1 타입 대조군으로, 구판 C3를 N2 정상 투영 대조군으로 옮긴다.",
+      "document": "docs/09_DELIVERY_AND_EXPERIMENTS.ko.md",
+      "introducedIn": "0.3.0-design"
+    },
+    {
+      "id": "F36",
+      "feedback": "지원 폼이 좁아 실제 반복성이 불명확",
+      "decision": "채택",
+      "resolution": "실제 쓰기 폼 제출 경로 최대 10개를 먼저 조사하고 합성 사례에서 빈도를 추정하지 않는다.",
+      "document": "docs/02_RESEARCH_AND_ADOPTION.ko.md",
+      "introducedIn": "0.3.0-design"
+    },
+    {
+      "id": "F37",
+      "feedback": "계약이 단순 폼에 비해 과도함",
+      "decision": "채택",
+      "resolution": "검사 전용 도입과 runtime 도입을 분리하고 필요한 구조만 단일 정본에서 파생한다.",
+      "document": "docs/03_CONTRACT_AND_SINGLE_SOURCE.ko.md",
+      "introducedIn": "0.3.0-design"
+    },
+    {
+      "id": "F38",
+      "feedback": "Bun SQLite 가정이 이식성을 제한",
+      "decision": "채택",
+      "resolution": "현재 운영 profile을 명시하고 scanner 입력은 DB와 분리한다. 플랫폼 지원 완료로 광고하지 않는다.",
+      "document": "docs/10_ARCHITECTURE_AND_TOOLCHAIN.ko.md",
+      "introducedIn": "0.3.0-design"
+    },
+    {
+      "id": "F39",
+      "feedback": "후속 저장소 이식 경로가 없음",
+      "decision": "설계 범위 채택",
+      "resolution": "별도 postgres-async profile과 원자성·잠금·commit 재조회 의무를 설계한다. P0에 구현하지 않는다.",
+      "document": "docs/10_ARCHITECTURE_AND_TOOLCHAIN.ko.md",
+      "introducedIn": "0.3.0-design"
+    },
+    {
+      "id": "F40",
+      "feedback": "기존 대안 대비 차별점 부족",
+      "decision": "채택",
+      "resolution": "Hono validator/RPC·기존 lint·custom script·SvelteKit·React Router·htmx·Conform을 비교 표에 포함한다.",
+      "document": "docs/02_RESEARCH_AND_ADOPTION.ko.md",
+      "introducedIn": "0.3.0-design"
+    },
+    {
+      "id": "F41",
+      "feedback": "외부 설명을 한 문장으로 명확히",
+      "decision": "채택",
+      "resolution": "HTML 폼과 서버 경계의 타입 안전 계약으로 고정하고 검사-only와 runtime 보장을 구분한다.",
+      "document": "docs/01_DECISION_AND_SCOPE.ko.md",
+      "introducedIn": "0.3.0-design"
+    },
+    {
+      "id": "F42",
+      "feedback": "P0를 작고 빠르고 정직하게",
+      "decision": "채택",
+      "resolution": "한 앱의 도구 구성만 바꾸고 metadata·parser 사용을 동등하게 허용한다. 도구 미실행은 미탐이 아니다.",
+      "document": "docs/12_IMPLEMENTER_HANDOFF.ko.md",
+      "introducedIn": "0.3.0-design"
+    },
+    {
+      "id": "F43",
+      "feedback": "성과 없으면 기존 도구나 래퍼만 남겨야 함",
+      "decision": "수정 채택",
+      "resolution": "기존 lint·작은 script·Doctor·wrapper를 각각 판단한다. Doctor 실패가 wrapper 채택 근거가 되지 않는다.",
+      "document": "docs/14_ACCEPTANCE_AND_EVIDENCE.ko.md",
+      "introducedIn": "0.3.0-design"
+    }
+  ],
+  "historyNotice": "F01-F33 retain v0.2 decisions. F34-F43 and current ADRs refine baseline, scope and release conditions."
+}

@@ -1,0 +1,25 @@
+{
+  "documentVersion": "0.5.0-design",
+  "runtimeTarget": "0.1-planned",
+  "date": "2026-11-05",
+  "previousArchive": "typehtml-research-design-v0.4-2026-11-05.zip",
+  "previousArchiveSha256": "c4a056081427b59809d038987110fd6ced0146205e029a883ae5d85c6014234d",
+  "workingName": "Boundary Contracts",
+  "publishedPackage": false,
+  "schemaAuthoritative": "examples/order.boundary.json",
+  "contractFormat": "boundary-contract/0.5-draft",
+  "operationRevision": 2,
+  "generatedArtifacts": [
+    "reference/order-types.generated.ts",
+    "examples/form-check.generated.json",
+    "examples/start-form-check.generated.json",
+    "reference/contract-digests.generated.json"
+  ],
+  "productionRuntimeImplemented": false,
+  "doctorScannerImplemented": false,
+  "p0Executed": false,
+  "researchSourcePolicy": "primary-official; new, reopened and inherited source records separated",
+  "installationAttemptThisRevision": false,
+  "browserAttemptThisRevision": false,
+  "notes": "Reference state/URL/sync functions, type fixtures, strict JSON and Python SQLite observations are distinct from product execution. Prior v0.4 browser block is historical evidence only."
+}

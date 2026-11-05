@@ -1,0 +1,25 @@
+{
+  "sqliteVersion": "3.46.1",
+  "connection": "one in-memory Python connection",
+  "observations": [
+    "DDL and foreign keys enabled",
+    "conditional insert at issued revision",
+    "computed total 24000",
+    "consumed intent inserts zero rows",
+    "new current revision cannot silently replace shown quote",
+    "wrong revision and behavior digest rejected",
+    "cross-intent result reference rejected",
+    "business draft intent uniqueness enforced",
+    "rollback removes attempted draft",
+    "inactive member inserts zero rows",
+    "exact expiry is expired",
+    "temporary cleanup preserves business draft",
+    "inconsistent consumed intent preserved and reported"
+  ],
+  "notRun": [
+    "Bun adapter",
+    "two-connection behavior in this in-memory check",
+    "HTTP idempotency handler",
+    "power loss or crash recovery"
+  ]
+}

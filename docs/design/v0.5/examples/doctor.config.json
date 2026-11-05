@@ -1,0 +1,136 @@
+{
+  "format": "boundary-doctor/0.5-draft",
+  "status": "design-reference",
+  "root": ".",
+  "discovery": {
+    "routes": [
+      "src/routes/**/*.ts"
+    ],
+    "executeSymbols": [
+      {
+        "module": "reference/order-bindings.ts",
+        "export": "buildOrderBindings",
+        "returnedProperty": "execute"
+      }
+    ],
+    "approvedAssemblyModules": [
+      "src/routes/order-boundary.ts"
+    ],
+    "externalSourceLinks": "deny",
+    "enabled": false,
+    "status": "future-design-not-run"
+  },
+  "heuristics": {
+    "sensitiveInputNames": [
+      "customerId",
+      "tenantId",
+      "ownerId",
+      "userId",
+      "priceMinor",
+      "totalMinor"
+    ],
+    "namePatterns": [
+      "(^|_)(owner|user|customer|tenant)(Id|_id)$"
+    ],
+    "severity": "warning",
+    "proof": "none"
+  },
+  "html": {
+    "profile": "forms-strict",
+    "conformanceProvider": "markuplint",
+    "localRules": [
+      "missing-required-field",
+      "unregistered-field",
+      "duplicate-scalar",
+      "method-path-mismatch",
+      "unsupported-transport",
+      "bounded-constraint-counterexample"
+    ],
+    "fieldErrorMapping": "not-provided-not-evaluated",
+    "constraintPolicy": "witness-only-warning-unless-explicit-policy",
+    "nativeSemantics": "native-form/1"
+  },
+  "audit": {
+    "partialExit": 0,
+    "releaseRequiresCompleteDeclaredBoundary": true,
+    "executeProjectModules": false,
+    "releaseRequiredRuleGroups": [
+      "binding",
+      "target",
+      "supply",
+      "cardinality"
+    ],
+    "unknownDoesNotEraseOtherFindings": true,
+    "zeroDeclaredBindings": "configuration-error",
+    "zeroEnumeratedPaths": "incomplete-not-vacuous-success"
+  },
+  "inputModes": {
+    "selected": "form-only",
+    "fullRuntimeContractOptional": true,
+    "sourceMode": "single-authoritative-source"
+  },
+  "reporting": {
+    "engineOrigin": true,
+    "originalRuleId": true,
+    "rootCauseDeduplication": true,
+    "unknownSeparate": true,
+    "comparativeValueDefault": "not-evaluated"
+  },
+  "inputs": [
+    {
+      "kind": "form-projection",
+      "path": "examples/form-check.generated.json"
+    },
+    {
+      "kind": "form-projection",
+      "path": "examples/start-form-check.generated.json"
+    }
+  ],
+  "documents": [
+    {
+      "path": "examples/html/form.initial.html",
+      "documentUrl": "https://example.invalid/orders/new?intent=DEMO",
+      "sourceKind": "rendered-snapshot",
+      "executionAssumption": "native-no-script-by-example",
+      "bindings": [
+        {
+          "formId": "create-draft",
+          "actionId": "orders.createDraft",
+          "required": true,
+          "submitterPolicy": "enumerate-native",
+          "constraintMismatchSeverity": "warning"
+        }
+      ]
+    },
+    {
+      "path": "examples/html/form.invalid.html",
+      "documentUrl": "https://example.invalid/orders/new?intent=DEMO",
+      "sourceKind": "rendered-snapshot",
+      "executionAssumption": "native-no-script-by-example",
+      "bindings": [
+        {
+          "formId": "create-draft",
+          "actionId": "orders.createDraft",
+          "required": true,
+          "submitterPolicy": "enumerate-native",
+          "constraintMismatchSeverity": "warning"
+        }
+      ]
+    },
+    {
+      "path": "examples/html/start.html",
+      "documentUrl": "https://example.invalid/orders/new?productId=p_100",
+      "sourceKind": "rendered-snapshot",
+      "executionAssumption": "native-no-script-by-example",
+      "bindings": [
+        {
+          "formId": "begin-draft",
+          "actionId": "orders.createDraft.begin",
+          "required": true,
+          "submitterPolicy": "enumerate-native",
+          "constraintMismatchSeverity": "warning"
+        }
+      ]
+    }
+  ]
+}

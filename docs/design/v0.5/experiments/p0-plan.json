@@ -1,0 +1,206 @@
+{
+  "format": "boundary-experiment-plan/0.3",
+  "status": "planned-not-executed",
+  "documentVersion": "0.3.0-design",
+  "purpose": "기존 도구·작은 스크립트로 충분한지 판단; Doctor 채택을 전제하지 않음",
+  "fitGate": {
+    "inventory": "experiments/adoption-inventory.template.json",
+    "maxSubmissionPaths": 10,
+    "order": "route/file lexical order before selection",
+    "unsupportedSelection": "record, do not hide",
+    "zeroEligibleAction": "stop-or-report-inconclusive"
+  },
+  "arms": [
+    {
+      "id": "B",
+      "composition": "existing tsc + validator + typed wrapper/helper",
+      "applicationCopies": 1
+    },
+    {
+      "id": "L",
+      "composition": "B + selected existing form/HTML lint",
+      "applicationCopies": 0
+    },
+    {
+      "id": "S",
+      "composition": "L + small contract/form script using the same schema, metadata and standard parsers",
+      "applicationCopies": 0
+    },
+    {
+      "id": "D",
+      "composition": "L + minimal Doctor",
+      "applicationCopies": 0
+    }
+  ],
+  "fairness": {
+    "sameBaseline": true,
+    "independentMutations": true,
+    "sameSchemaAndMetadata": true,
+    "existingTypedHelpersRetained": true,
+    "allowScriptStandardParser": true,
+    "scriptArtificialLineLimit": null,
+    "freezeToolConfigBeforeComparison": true,
+    "missingToolMeans": "NOT_RUN, not a miss",
+    "sameFindingCountedOnce": true,
+    "orderRecorded": true,
+    "noDatabaseRequired": true,
+    "bindingMetadataShared": true,
+    "semanticProbeNotDiscoveryCredit": true
+  },
+  "cases": [
+    {
+      "id": "C1",
+      "kind": "candidate-defect",
+      "name": "필수 입력 추가",
+      "mutation": "input.required에 referenceNote 추가, schema와 TS 연결을 갱신하고 HTML에는 공급 입력을 추가하지 않는다.",
+      "expectedByDesign": "정적 필드 공급 누락. 어떤 도구가 찾는지는 미측정.",
+      "comparisonStage": "static-form",
+      "cause": "missing-required-field",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "C2",
+      "kind": "candidate-defect",
+      "name": "submitter 경로 변경",
+      "mutation": "새 POST route와 form action을 맞추되 특정 submitter의 formaction만 이전 경로에 남긴다. 이전 route는 제거한다.",
+      "expectedByDesign": "문서/formId에 독립 결합한 action과 submitter의 유효 URL을 대조한다. 잘못된 목적지를 이유로 폼을 분석 목록에서 누락하지 않는다.",
+      "comparisonStage": "static-form",
+      "cause": "effective-target-mismatch",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "C3",
+      "kind": "candidate-defect",
+      "name": "서버 제약 변경",
+      "mutation": "quantity maximum을 20에서 10으로 바꾸고 기존 text pattern은 유지한다. 검사 반례는 문자열 11이다.",
+      "expectedByDesign": "고정된 native 검증 가정에서 문자열 11이 HTML에서 허용되고 서버에서 거부되는 구체 반례. 기본 warning이며 일반 동치성·보안 실패를 주장하지 않는다.",
+      "comparisonStage": "static-form",
+      "cause": "constraint-counterexample",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "N1",
+      "kind": "attribution-control",
+      "name": "필수 정책 역할 제거",
+      "mutation": "typed binding에서 authorize 속성을 제거한다.",
+      "expectedByDesign": "tsc가 거부할 구조적 대조군. Doctor 통합 표시의 추가 발견 공로는 0.",
+      "comparisonStage": "typecheck",
+      "cause": "required-role-missing",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "N2",
+      "kind": "negative-control",
+      "name": "내부 결과 확장",
+      "mutation": "Result에 supplierCostMinor를 추가하되 public schema와 명시적 projector를 유지한다.",
+      "expectedByDesign": "공개 누출이 없는 정상 변경. 새로운 누출 진단은 오탐 후보.",
+      "comparisonStage": "runtime-projection-control",
+      "cause": "safe-internal-field-addition",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "N3",
+      "kind": "attribution-control",
+      "name": "접근 가능한 이름 제거",
+      "mutation": "수량 필드의 label과 다른 naming 수단을 제거한다.",
+      "expectedByDesign": "선정한 기존 lint의 결과를 확인하며 출처는 원래 엔진이다.",
+      "comparisonStage": "static-form",
+      "cause": "accessible-name-missing",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "G1",
+      "kind": "valid-control",
+      "name": "정상 기본 폼",
+      "mutation": "동일 계약과 초기 HTML을 변경 없이 사용한다.",
+      "expectedByDesign": "확정 차단 없음. 실제 상태는 실행 전 미정.",
+      "comparisonStage": "static-form",
+      "cause": "valid-native-form",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "G2",
+      "kind": "valid-control",
+      "name": "외부 form 소유 입력",
+      "mutation": "quantity를 form 밖으로 이동하고 form=id 속성으로 같은 form에 연결한다.",
+      "expectedByDesign": "실제 form 소유권을 반영하면 필수 입력 누락이 아니다.",
+      "comparisonStage": "static-form",
+      "cause": "valid-external-control",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "U1",
+      "kind": "scope-control",
+      "name": "사용자 정의 직렬화",
+      "mutation": "submit handler가 임의 JS로 키와 값을 재구성한다.",
+      "expectedByDesign": "확정 안전/결함 대신 unknown과 해당 source 위치.",
+      "comparisonStage": "static-form",
+      "cause": "custom-serialization",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "U2",
+      "kind": "scope-control",
+      "name": "조건부 공급",
+      "mutation": "quantity 공급이 분석되지 않은 조건부 template 분기에 달려 있다.",
+      "expectedByDesign": "snapshot 한 상태에서 전체 template 공급을 증명하지 않고 unknown.",
+      "comparisonStage": "static-form",
+      "cause": "conditional-field",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    },
+    {
+      "id": "U3",
+      "kind": "scope-control",
+      "name": "파일 제출",
+      "mutation": "multipart enctype와 file 입력을 사용하는 경로를 추가한다.",
+      "expectedByDesign": "unsupported이며 보안 결함이나 Doctor 추가 발견으로 세지 않는다.",
+      "comparisonStage": "static-form",
+      "cause": "unsupported-multipart",
+      "realFixturePath": null,
+      "rawExecutionEvidence": null
+    }
+  ],
+  "attribution": {
+    "unit": "action + submission path + root cause",
+    "additionalFinding": "confirmed by D; B,L,S actually ran comparably at the same stage and did not detect that cause",
+    "earlierFinding": "runtime-only detection moved earlier, reported separately",
+    "overlap": "same-stage existing tool detection gives zero additional-discovery credit",
+    "globalNoveltyClaim": false,
+    "unknownIsSafe": false
+  },
+  "costs": [
+    "one-time adoption and schema bridge",
+    "manual fields/files/links",
+    "all artifacts including generated",
+    "mutation editing",
+    "triage and suppression",
+    "tool configuration maintenance"
+  ],
+  "gateOutcomes": [
+    "USE_EXISTING_LINT",
+    "KEEP_SMALL_SCRIPT",
+    "PROVISIONAL_DOCTOR_SECOND_CASE",
+    "CONVENIENCE_TOOL_ONLY",
+    "WRAPPER_SEPARATE_REVIEW",
+    "NO_FIT",
+    "INCONCLUSIVE",
+    "STOP"
+  ],
+  "secondCaseGate": "Only one retained candidate rule or convenience claim, on a second actual path or independent real change; no forced framework expansion",
+  "measurements": null,
+  "decision": null,
+  "generator": "not part of P0",
+  "revision": "0.4-design",
+  "semanticCorrectnessPrerequisite": "Only implement supported native semantics; use reference probes as implementation fixtures, not B/L/S/D product results.",
+  "stopRule": "No actual eligible project means INCONCLUSIVE/NO_FIT; do not expand scope to manufacture a win."
+}

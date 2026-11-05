@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boundary Form Check draft 0.2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "status",
+    "source",
+    "action",
+    "input",
+    "protocolFields"
+  ],
+  "properties": {
+    "format": {
+      "const": "boundary-form-check/0.2-draft"
+    },
+    "status": {
+      "const": "generated-design-reference-not-product-output"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "generator",
+        "projection",
+        "runtimeCoverage",
+        "behaviorSha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "generator": {
+          "type": "string"
+        },
+        "projection": {
+          "const": "exact-for-selected-structural-fields"
+        },
+        "runtimeCoverage": {
+          "const": "not-evaluated"
+        },
+        "behaviorSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "method",
+        "path",
+        "encoding",
+        "parserProfile"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "method": {
+          "const": "POST"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/[^?#]*$"
+        },
+        "encoding": {
+          "const": "urlencoded"
+        },
+        "parserProfile": {
+          "const": "strict-urlencoded-utf8/1"
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "codecs",
+        "unknownKeys",
+        "duplicateScalars",
+        "scalarSemantics"
+      ],
+      "properties": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ],
+          "properties": {
+            "type": {
+              "const": "object"
+            },
+            "additionalProperties": {
+              "const": false
+            },
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "uniqueItems": true
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "string",
+                      "integer"
+                    ]
+                  },
+                  "minimum": {
+                    "type": "integer"
+                  },
+                  "maximum": {
+                    "type": "integer"
+                  },
+                  "minLength": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "maxLength": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "const": {
+                    "type": [
+                      "string",
+                      "integer"
+                    ]
+                  },
+                  "enum": {
+                    "type": "array",
+                    "items": {
+                      "type": [
+                        "string",
+                        "integer"
+                      ]
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "codecs": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "text",
+              "decimal-integer"
+            ]
+          }
+        },
+        "unknownKeys": {
+          "const": "reject"
+        },
+        "duplicateScalars": {
+          "const": "reject"
+        },
+        "scalarSemantics": {
+          "const": {
+            "missing": "absent",
+            "emptyString": "preserve",
+            "textNormalization": "none",
+            "schemaStringLength": "unicode-code-points",
+            "validationMutatesData": false
+          }
+        }
+      }
+    },
+    "protocolFields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  }
+}

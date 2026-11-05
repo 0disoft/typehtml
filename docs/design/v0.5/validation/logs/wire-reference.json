@@ -1,0 +1,75 @@
+{
+  "node": "v22.16.0",
+  "scope": "bounded reference wire/codec/canonical functions, not HTTP runtime",
+  "checks": [
+    {
+      "id": "plus-percent-single-decode",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "decoded-key-duplicate",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "malformed-percent",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "invalid-utf8",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "first-equals-and-empty-segment",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "empty-and-missing",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "bom-is-value",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "unsafe-key",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "unexpected-reserved",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "nul",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "bounded-body",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "integer-codec",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "unicode-units",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "typed-canonical-input",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "id": "lone-surrogate-rejected",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    }
+  ],
+  "canonicalInput": "[\"bc-input/1\",[[\"productId\",\"string\",\"p_100\"],[\"quantity\",\"integer\",2]]]",
+  "sha256": "aae8be4dbbccaeeff6889697852a2c1f5f900e06d14a01830fd2f5d49024bf26",
+  "notRun": [
+    "HTTP stream",
+    "schema runtime",
+    "CSRF",
+    "Doctor",
+    "performance"
+  ]
+}

@@ -1,0 +1,210 @@
+{
+  "status": "authored-isolated-native-probes",
+  "documentUrl": "https://example.invalid/orders/new?intent=DEMO",
+  "cases": [
+    {
+      "id": "external-owner",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"></form><input name=\"q\" value=\"2\" form=\"f\">",
+      "expect": {
+        "entries": [
+          [
+            "q",
+            "2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "disabled-false",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"q\" value=\"2\" disabled=\"false\"></form>",
+      "expect": {
+        "entries": []
+      }
+    },
+    {
+      "id": "fieldset-first-legend",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><fieldset disabled><legend>A<input name=\"keep\" value=\"1\"></legend><input name=\"drop\" value=\"2\"></fieldset></form>",
+      "expect": {
+        "entries": [
+          [
+            "keep",
+            "1"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "hidden-css-still-sent",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"a\" value=\"1\" hidden><input name=\"b\" value=\"2\" style=\"display:none\"></form>",
+      "expect": {
+        "entries": [
+          [
+            "a",
+            "1"
+          ],
+          [
+            "b",
+            "2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "readonly-submitted",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input id=\"q\" name=\"q\" value=\"\" required readonly></form>",
+      "expect": {
+        "entries": [
+          [
+            "q",
+            ""
+          ]
+        ],
+        "valid": true,
+        "willValidate": false
+      },
+      "inspect": "q"
+    },
+    {
+      "id": "unchecked-and-default-on",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"a\" type=\"checkbox\"><input name=\"b\" type=\"checkbox\" checked></form>",
+      "expect": {
+        "entries": [
+          [
+            "b",
+            "on"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "named-submitter",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"q\" value=\"2\"><button id=\"b1\" name=\"op\" value=\"save\">Save</button><button name=\"op\" value=\"other\">Other</button></form>",
+      "expect": {
+        "entries": [
+          [
+            "q",
+            "2"
+          ],
+          [
+            "op",
+            "save"
+          ]
+        ]
+      },
+      "submitter": "b1"
+    },
+    {
+      "id": "submitter-overrides",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><button id=\"b1\" formaction=\"/alternate\" formmethod=\"get\" formenctype=\"multipart/form-data\" formnovalidate>Go</button></form>",
+      "expect": {
+        "effective": {
+          "url": "https://example.invalid/alternate",
+          "method": "get",
+          "encoding": "multipart/form-data",
+          "skipValidation": true
+        }
+      },
+      "submitter": "b1"
+    },
+    {
+      "id": "duplicate-scalar",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"q\" value=\"1\"></form><input form=\"f\" name=\"q\" value=\"2\">",
+      "expect": {
+        "entries": [
+          [
+            "q",
+            "1"
+          ],
+          [
+            "q",
+            "2"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "form-owner-missing",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"q\" value=\"2\" form=\"missing\"></form>",
+      "expect": {
+        "entries": []
+      }
+    },
+    {
+      "id": "required-entry-vs-validation",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input id=\"q\" name=\"q\" required></form>",
+      "expect": {
+        "entries": [
+          [
+            "q",
+            ""
+          ]
+        ],
+        "valid": false,
+        "willValidate": true
+      },
+      "inspect": "q"
+    },
+    {
+      "id": "dirname-adds-entry",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"q\" value=\"x\" dirname=\"q_dir\" dir=\"ltr\"></form>",
+      "expect": {
+        "entries": [
+          [
+            "q",
+            "x"
+          ],
+          [
+            "q_dir",
+            "ltr"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "formdata-mutates-entry",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"q\" value=\"2\"></form>",
+      "expect": {
+        "entries": [
+          [
+            "q",
+            "2"
+          ],
+          [
+            "injected",
+            "yes"
+          ]
+        ]
+      },
+      "mutation": "formdata-demo"
+    },
+    {
+      "id": "base-url",
+      "html": "<base href=\"https://example.invalid/nested/\"><form id=\"f\" action=\"save\" method=\"post\"></form>",
+      "expect": {
+        "effective": {
+          "url": "https://example.invalid/nested/save",
+          "method": "post",
+          "encoding": "application/x-www-form-urlencoded",
+          "skipValidation": false
+        }
+      }
+    },
+    {
+      "id": "pattern-full-match",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"q\" value=\"112\" pattern=\"12\"></form>",
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "request-submit-validation",
+      "html": "<form id=\"f\" action=\"/save\" method=\"post\"><input name=\"q\" required><button id=\"b1\">Go</button></form>",
+      "expect": {
+        "normalSubmitEvents": 0,
+        "noValidateSubmitEvents": 1
+      },
+      "probe": "request-submit",
+      "submitter": "b1"
+    }
+  ]
+}

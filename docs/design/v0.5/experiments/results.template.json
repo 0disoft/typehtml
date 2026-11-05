@@ -1,0 +1,649 @@
+{
+  "format": "boundary-experiment-results/0.3",
+  "status": "template-not-executed",
+  "planRef": "experiments/p0-plan.json",
+  "baselineCommit": null,
+  "projectScope": null,
+  "runOrder": null,
+  "environment": null,
+  "inventoryEvidence": null,
+  "armSetup": {
+    "B": {
+      "toolVersions": null,
+      "configHashes": null,
+      "commands": null,
+      "manualArtifacts": null,
+      "generatedArtifacts": null,
+      "manualFieldCount": null,
+      "adoptionMinutes": null,
+      "setupEvidence": null
+    },
+    "L": {
+      "toolVersions": null,
+      "configHashes": null,
+      "commands": null,
+      "manualArtifacts": null,
+      "generatedArtifacts": null,
+      "manualFieldCount": null,
+      "adoptionMinutes": null,
+      "setupEvidence": null
+    },
+    "S": {
+      "toolVersions": null,
+      "configHashes": null,
+      "commands": null,
+      "manualArtifacts": null,
+      "generatedArtifacts": null,
+      "manualFieldCount": null,
+      "adoptionMinutes": null,
+      "setupEvidence": null
+    },
+    "D": {
+      "toolVersions": null,
+      "configHashes": null,
+      "commands": null,
+      "manualArtifacts": null,
+      "generatedArtifacts": null,
+      "manualFieldCount": null,
+      "adoptionMinutes": null,
+      "setupEvidence": null
+    }
+  },
+  "cases": [
+    {
+      "id": "C1",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "C2",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "C3",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "N1",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "N2",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "N3",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "G1",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "G2",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "U1",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "U2",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    },
+    {
+      "id": "U3",
+      "mutationDiffRef": null,
+      "baselineHash": null,
+      "mutatedHash": null,
+      "byArm": {
+        "B": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "L": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "S": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        },
+        "D": {
+          "status": "NOT_RUN",
+          "firstDetectionStage": null,
+          "findings": null,
+          "rawEvidenceRef": null,
+          "toolElapsedMs": null,
+          "manualEditingMinutes": null,
+          "triageMinutes": null,
+          "manualArtifactsChanged": null,
+          "suppressionCount": null
+        }
+      },
+      "comparativeJudgement": null
+    }
+  ],
+  "conclusion": {
+    "decision": null,
+    "additionalFindings": null,
+    "earlierFindings": null,
+    "overlapFindings": null,
+    "falsePositives": null,
+    "actualRecurrenceEvidence": null,
+    "secondCaseEvidence": null,
+    "costDifferenceEvidence": null,
+    "generalization": "none before measurements"
+  },
+  "notice": "Copy this template for real records. Authored expected values are not observed detections."
+}

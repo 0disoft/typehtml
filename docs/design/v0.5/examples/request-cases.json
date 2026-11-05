@@ -1,0 +1,281 @@
+{
+  "status": "expected-not-http-executed",
+  "cases": [
+    {
+      "id": "normal",
+      "mutation": "quantity=2",
+      "status": 303,
+      "newDrafts": 1,
+      "executed": false
+    },
+    {
+      "id": "native-get-receipt",
+      "mutation": "follow-success-location",
+      "status": 200,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "invalid-quantity",
+      "mutation": "quantity=21",
+      "status": 422,
+      "newDrafts": 0,
+      "sameIntent": true,
+      "executed": false,
+      "precondition": "OPEN intent, unchanged resource revision"
+    },
+    {
+      "id": "exponent",
+      "mutation": "quantity=1e1",
+      "status": 422,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "duplicate",
+      "mutation": "quantity=1&quantity=2",
+      "status": 400,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "unknown-owner",
+      "mutation": "ownerId=someone",
+      "status": 400,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "proto",
+      "mutation": "__proto__=x",
+      "status": 400,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "unknown-reserved",
+      "mutation": "_bc_admin=1",
+      "status": 400,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "legacy-reserved",
+      "mutation": "_th_request=old",
+      "status": 400,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "bad-csrf",
+      "mutation": "invalid-session-token",
+      "status": 403,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "origin-null",
+      "mutation": "Origin:null",
+      "status": 403,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "no-origin-same-referer",
+      "mutation": "no-Origin;same-origin-Referer;valid-CSRF",
+      "status": 303,
+      "newDrafts": 1,
+      "executed": false
+    },
+    {
+      "id": "missing-source",
+      "mutation": "no-Origin;no-Referer;valid-CSRF",
+      "status": 403,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "wrong-tenant",
+      "mutation": "other-tenant-product",
+      "status": 404,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "multipart",
+      "mutation": "Content-Type:multipart/form-data",
+      "status": 415,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "too-large",
+      "mutation": "streamed-body-over-16384-bytes",
+      "status": 413,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "same-replay",
+      "mutation": "same-intent-and-input-after-commit",
+      "status": 303,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "different-replay",
+      "mutation": "same-intent-different-validated-input",
+      "status": 409,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "unknown-intent",
+      "mutation": "client-invented-or-cleaned-intent",
+      "status": 410,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "busy",
+      "mutation": "BEGIN lock not acquired within configured 5000ms budget",
+      "status": 503,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "cas-mismatch",
+      "mutation": "affectedRows=0",
+      "status": 409,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "revoked-replay",
+      "mutation": "receipt-permission-revoked",
+      "status": 404,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "json-accept",
+      "mutation": "Accept:application/json",
+      "status": 406,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "start-get",
+      "mutation": "GET /orders/new?productId=p",
+      "status": 200,
+      "newDrafts": 0,
+      "executed": false,
+      "newIntents": 0
+    },
+    {
+      "id": "start-post",
+      "mutation": "CSRF-protected POST /actions/orders/begin-draft productId=p",
+      "status": 303,
+      "newDrafts": 0,
+      "executed": false,
+      "newIntents": 1
+    },
+    {
+      "id": "prefetch",
+      "mutation": "automated GET of start page",
+      "status": 200,
+      "newDrafts": 0,
+      "executed": false,
+      "newIntents": 0
+    },
+    {
+      "id": "quoted-price-changed",
+      "mutation": "OPEN intent revision=7; current product revision=8 before submit",
+      "status": 409,
+      "newDrafts": 0,
+      "executed": false,
+      "errorCode": "QUOTE_CHANGED"
+    },
+    {
+      "id": "contract-changed-first",
+      "mutation": "intent old behavior; current schema adds required field",
+      "status": 409,
+      "newDrafts": 0,
+      "executed": false,
+      "errorCode": "CONTRACT_CHANGED"
+    },
+    {
+      "id": "committed-invalid-replay",
+      "mutation": "COMMITTED intent; quantity=not-an-integer",
+      "status": 409,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "cosmetic-contract-change",
+      "mutation": "same behavior digest; source JSON reformatted; same committed payload",
+      "status": 303,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "malformed-percent",
+      "mutation": "quantity=%G1",
+      "status": 400,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "invalid-utf8",
+      "mutation": "productId=%FF",
+      "status": 400,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "encoded-duplicate",
+      "mutation": "quantity=1&%71uantity=2",
+      "status": 400,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "empty-quantity",
+      "mutation": "quantity=",
+      "status": 422,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "exact-expiry",
+      "mutation": "OPEN intent expires_at == server now",
+      "status": 410,
+      "newDrafts": 0,
+      "executed": false
+    },
+    {
+      "id": "invalid-render-after-other-tab-commit",
+      "mutation": "OPEN snapshot and invalid quantity; another tab commits before fresh pre-render snapshot",
+      "status": 409,
+      "newDrafts": 0,
+      "executed": false,
+      "errorCode": "COMPLETED_INPUT_CONFLICT"
+    },
+    {
+      "id": "consumed-without-result",
+      "mutation": "current authorization succeeds; consumed_at is set but durable action_result is missing",
+      "status": 500,
+      "newDrafts": 0,
+      "executed": false,
+      "errorCode": "INTENT_STATE_INVALID"
+    },
+    {
+      "id": "committed-view-after-contract-change",
+      "mutation": "GET of completed intent with unexpired result and current receipt authorization; current behavior digest differs",
+      "status": 303,
+      "newDrafts": 0,
+      "executed": false
+    }
+  ],
+  "preconditions": "각 사례는 별도 초기 상태다. 정상 submit에는 CSRF, scope가 맞는 서버 발급 OPEN intent와 현재 behavior digest, 발급 당시 상품 revision이 필요하다. 미기재 값은 기본 정상 요청이다."
+}

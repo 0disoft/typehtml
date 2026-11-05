@@ -1,0 +1,454 @@
+{
+  "generatedAtUtc": "2026-11-05T08:47:02.173030+00:00",
+  "python": "3.13.5",
+  "platform": "Linux",
+  "checks": [
+    {
+      "name": "contract_and_data",
+      "group": "ARTIFACT",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "authoritativeContract": "examples/order.boundary.json",
+        "negativeSchemaCases": 5,
+        "scope": "metadata and sample data, not runtime"
+      }
+    },
+    {
+      "name": "generated_type_freshness",
+      "group": "ARTIFACT",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "exitCode": 0,
+        "sourceSha256": "8d28473d4cc7141575930268c4843ea6e487ff560d379e206c38b1512050cf4e",
+        "derivedArtifacts": 4,
+        "formProjectionScope": "selected structural fields only; not a product loader"
+      }
+    },
+    {
+      "name": "strict_json_reader",
+      "group": "ARTIFACT",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "rejectedCases": 7,
+        "validCase": true,
+        "scope": "reference metadata reader, not product CLI"
+      }
+    },
+    {
+      "name": "behavior_digest_semantics",
+      "group": "ARTIFACT",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "behaviorSha256": "54f41ad4f93d68a25db8148f355e0dd6becc6db23005c24e93930d9b847e0c66",
+        "sourceFormattingIgnored": true,
+        "selectedInputChangeDetected": true,
+        "explicitOperationRevisionChangeDetected": true,
+        "callbackEquivalenceProven": false
+      }
+    },
+    {
+      "name": "html_snapshot_assertions",
+      "group": "ARTIFACT",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "snapshots": 3,
+        "scope": "explicit structural assertions using Python HTMLParser, not an HTML5 browser or accessibility engine"
+      }
+    },
+    {
+      "name": "feedback_and_sources",
+      "group": "ARTIFACT",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "sourceRecords": 45,
+        "feedbackDecisions": 43,
+        "authoredDiagnostics": "not product output"
+      }
+    },
+    {
+      "name": "experiment_plan_consistency",
+      "group": "ARTIFACT",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "arms": 4,
+        "plannedCases": 11,
+        "resultSlots": 44,
+        "allProductMeasurementsUnexecuted": true,
+        "actualFormInventoryPerformed": false,
+        "scope": "plan/template consistency, not a baseline or Doctor evaluation"
+      }
+    },
+    {
+      "name": "tsc_reference_roles",
+      "group": "REFERENCE_TYPES",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "version": "Version 5.8.3",
+        "exitCode": 0,
+        "expectedTypeRejections": 9,
+        "scope": "reference role fixtures; no production or latest-toolchain claim"
+      }
+    },
+    {
+      "name": "wire_reference_semantics",
+      "group": "WIRE_REFERENCE",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "node": "v22.16.0",
+        "scope": "bounded reference wire/codec/canonical functions, not HTTP runtime",
+        "checks": [
+          {
+            "id": "plus-percent-single-decode",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "decoded-key-duplicate",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "malformed-percent",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "invalid-utf8",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "first-equals-and-empty-segment",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "empty-and-missing",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "bom-is-value",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "unsafe-key",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "unexpected-reserved",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "nul",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "bounded-body",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "integer-codec",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "unicode-units",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "typed-canonical-input",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "id": "lone-surrogate-rejected",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          }
+        ],
+        "canonicalInput": "[\"bc-input/1\",[[\"productId\",\"string\",\"p_100\"],[\"quantity\",\"integer\",2]]]",
+        "sha256": "aae8be4dbbccaeeff6889697852a2c1f5f900e06d14a01830fd2f5d49024bf26",
+        "notRun": [
+          "HTTP stream",
+          "schema runtime",
+          "CSRF",
+          "Doctor",
+          "performance"
+        ]
+      }
+    },
+    {
+      "name": "sqlite_reference_semantics",
+      "group": "SQL_ILLUSTRATION",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "sqliteVersion": "3.46.1",
+        "connection": "one in-memory Python connection",
+        "observations": [
+          "DDL and foreign keys enabled",
+          "conditional insert at issued revision",
+          "computed total 24000",
+          "consumed intent inserts zero rows",
+          "new current revision cannot silently replace shown quote",
+          "wrong revision and behavior digest rejected",
+          "cross-intent result reference rejected",
+          "business draft intent uniqueness enforced",
+          "rollback removes attempted draft",
+          "inactive member inserts zero rows",
+          "exact expiry is expired",
+          "temporary cleanup preserves business draft",
+          "inconsistent consumed intent preserved and reported"
+        ],
+        "notRun": [
+          "Bun adapter",
+          "two-connection behavior in this in-memory check",
+          "HTTP idempotency handler",
+          "power loss or crash recovery"
+        ]
+      }
+    },
+    {
+      "name": "state_sync_url_reference",
+      "group": "STATE_REFERENCE",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "node": "v22.16.0",
+        "scope": "pure copied-snapshot decisions, sync-result guard and URL supplied-attribute facts only",
+        "checks": [
+          {
+            "group": "STATE",
+            "id": "missing-unavailable",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "permission-precedes-detail",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "open-view",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "open-needs-input",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "open-invalid",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "open-write-is-only-candidate",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "open-exact-expiry",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "contract-before-input",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "quote-before-input",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "committed-view-price-independent",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "committed-get-new-contract",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "committed-same-replay",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "committed-different-input",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "committed-invalid-not-422",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "committed-post-contract-conflict",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "result-exact-expiry",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "missing-result-is-corruption",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "open-durable-work-is-corruption",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "metadata-mismatch-is-corruption",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "completion-after-open-expiry-is-corruption",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "invalid-clock",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "fresh-state-before-invalid-render",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "fresh-expiry-before-invalid-render",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "STATE",
+            "id": "result-ttl-outlives-open-ttl",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "SYNC",
+            "id": "plain-value",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "SYNC",
+            "id": "promise-rejected",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "SYNC",
+            "id": "thenable-rejected",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "SYNC",
+            "id": "getter-not-called",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "URL",
+            "id": "missing-action-document-not-base",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "URL",
+            "id": "empty-action-document-not-base",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "URL",
+            "id": "relative-action-uses-base",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "URL",
+            "id": "empty-submitter-overrides-form",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "URL",
+            "id": "explicit-submitter-wins",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "URL",
+            "id": "fixed-path-rejects-normalization",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          },
+          {
+            "group": "URL",
+            "id": "fixed-path-current-contract",
+            "status": "VERIFIED_REFERENCE_ONLY"
+          }
+        ],
+        "notRun": [
+          "HTTP coordinator",
+          "authentication",
+          "DB permissions",
+          "HTML parsing",
+          "browser submission",
+          "Doctor",
+          "P0",
+          "performance"
+        ]
+      }
+    },
+    {
+      "name": "sqlite_snapshot_reference",
+      "group": "SQL_SNAPSHOT_REFERENCE",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "status": "VERIFIED_REFERENCE_ONLY",
+        "sqliteVersion": "3.46.1",
+        "connections": 2,
+        "journalMode": "wal",
+        "schedule": "deterministic interleaving in one Python process",
+        "observations": [
+          "reader retains OPEN snapshot across other-connection completion",
+          "new read transaction observes consumed intent and matching result together",
+          "completed result read does not require a writer reservation"
+        ],
+        "notRun": [
+          "Bun adapter",
+          "simultaneous HTTP requests",
+          "throughput",
+          "crash or power loss",
+          "current-deployment SQLite qualification"
+        ]
+      }
+    },
+    {
+      "name": "json_syntax",
+      "group": "ARTIFACT",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "jsonFilesParsed": 30,
+        "scope": "syntax only"
+      }
+    },
+    {
+      "name": "markdown_links",
+      "group": "ARTIFACT",
+      "status": "VERIFIED_REFERENCE_ONLY",
+      "detail": {
+        "localLinksChecked": 150,
+        "scope": "file and explicit source anchors; no remote crawl"
+      }
+    }
+  ],
+  "productValidation": {
+    "httpRuntime": "NOT_IMPLEMENTED_NOT_RUN",
+    "doctorScanner": "NOT_IMPLEMENTED_NOT_RUN",
+    "browserAndAccessibilityEngine": "NOT_RUN",
+    "isolatedNativeDomAttempt": "NOT_ATTEMPTED_V05_PRIOR_V04_BLOCK_RETAINED",
+    "bunSqliteAdapter": "NOT_IMPLEMENTED_NOT_RUN",
+    "targetStableTypeScript": "NOT_RUN",
+    "actualFormInventory": "NOT_RUN",
+    "p0BLSDValueComparison": "NOT_RUN",
+    "postgresAsyncAdapter": "NOT_IMPLEMENTED_NOT_RUN",
+    "performance": "NOT_RUN"
+  },
+  "scope": "design-package consistency and bounded reference examples only"
+}

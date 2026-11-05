@@ -1,0 +1,19 @@
+{
+  "status": "VERIFIED_REFERENCE_ONLY",
+  "sqliteVersion": "3.46.1",
+  "connections": 2,
+  "journalMode": "wal",
+  "schedule": "deterministic interleaving in one Python process",
+  "observations": [
+    "reader retains OPEN snapshot across other-connection completion",
+    "new read transaction observes consumed intent and matching result together",
+    "completed result read does not require a writer reservation"
+  ],
+  "notRun": [
+    "Bun adapter",
+    "simultaneous HTTP requests",
+    "throughput",
+    "crash or power loss",
+    "current-deployment SQLite qualification"
+  ]
+}

@@ -1,0 +1,844 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boundary Contracts 0.5 design reference format",
+  "description": "Design artifact schema. Does not implement runtime security, route analysis, or framework support.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "status",
+    "id",
+    "operation",
+    "sourceMode",
+    "http",
+    "protocol",
+    "input",
+    "serverOwnedFields",
+    "bindings",
+    "guards",
+    "output",
+    "page",
+    "response",
+    "headers",
+    "operationRevision"
+  ],
+  "properties": {
+    "format": {
+      "const": "boundary-contract/0.5-draft"
+    },
+    "status": {
+      "const": "design-reference"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.]*$"
+    },
+    "operation": {
+      "const": "write"
+    },
+    "sourceMode": {
+      "const": "json-authoritative"
+    },
+    "http": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "path",
+        "body",
+        "maxBytes",
+        "maxEntries",
+        "maxKeyBytes",
+        "maxValueBytes",
+        "charset",
+        "contentEncoding",
+        "parserProfile"
+      ],
+      "properties": {
+        "method": {
+          "const": "POST"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/(?!/)[^\\s?#\\\\]*$",
+          "description": "Same-origin canonical path. URL round-trip equality is an additional semantic check."
+        },
+        "body": {
+          "const": "urlencoded"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxEntries": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxKeyBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxValueBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "charset": {
+          "const": "utf-8"
+        },
+        "contentEncoding": {
+          "const": "identity-only"
+        },
+        "parserProfile": {
+          "const": "strict-urlencoded-utf8/1"
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "csrfField",
+        "requestKeyField",
+        "countProtocolEntries"
+      ],
+      "properties": {
+        "csrfField": {
+          "const": "_bc_csrf"
+        },
+        "requestKeyField": {
+          "const": "_bc_request"
+        },
+        "countProtocolEntries": {
+          "const": true
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "codecs",
+        "unknownKeys",
+        "duplicateScalars",
+        "scalarSemantics"
+      ],
+      "properties": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "additionalProperties",
+            "required",
+            "properties"
+          ],
+          "properties": {
+            "type": {
+              "const": "object"
+            },
+            "additionalProperties": {
+              "const": false
+            },
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "uniqueItems": true
+            },
+            "properties": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "string"
+                      },
+                      "minLength": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxLength": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "const": {
+                        "type": "string"
+                      },
+                      "enum": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "uniqueItems": true
+                      },
+                      "pattern": {
+                        "enum": [
+                          "^draft_[A-Za-z0-9_-]{1,58}$"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "integer"
+                      },
+                      "minimum": {
+                        "type": "integer"
+                      },
+                      "maximum": {
+                        "type": "integer"
+                      },
+                      "const": {
+                        "type": "integer"
+                      },
+                      "enum": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        },
+                        "minItems": 1,
+                        "uniqueItems": true
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "codecs": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "enum": [
+              "text",
+              "decimal-integer"
+            ]
+          }
+        },
+        "unknownKeys": {
+          "const": "reject"
+        },
+        "duplicateScalars": {
+          "const": "reject"
+        },
+        "scalarSemantics": {
+          "const": {
+            "missing": "absent",
+            "emptyString": "preserve",
+            "textNormalization": "none",
+            "schemaStringLength": "unicode-code-points",
+            "validationMutatesData": false
+          }
+        }
+      }
+    },
+    "serverOwnedFields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+      },
+      "uniqueItems": true
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "module",
+        "export",
+        "kind",
+        "roleType"
+      ],
+      "properties": {
+        "module": {
+          "type": "string",
+          "minLength": 1
+        },
+        "export": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+        },
+        "kind": {
+          "const": "typed-factory"
+        },
+        "roleType": {
+          "const": "BindingRoleMap"
+        }
+      }
+    },
+    "guards": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "csrf",
+        "originProfile",
+        "transaction",
+        "resourceRevision",
+        "idempotency"
+      ],
+      "properties": {
+        "csrf": {
+          "const": "session-synchronizer"
+        },
+        "originProfile": {
+          "const": "same-origin-with-referer-fallback"
+        },
+        "transaction": {
+          "const": "sqlite-immediate-sync"
+        },
+        "resourceRevision": {
+          "const": "required-cas"
+        },
+        "idempotency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "intent",
+            "intentTtlSeconds",
+            "resultRetentionSeconds",
+            "busyRetryBudgetMs",
+            "retryAfterSeconds",
+            "replay",
+            "digest",
+            "issuedResourceRevision",
+            "missingIntent",
+            "resultStorage",
+            "expiryComparison",
+            "statePolicy",
+            "readConsistency",
+            "replayLock",
+            "corruption"
+          ],
+          "properties": {
+            "intent": {
+              "const": "server-persisted"
+            },
+            "intentTtlSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "resultRetentionSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "busyRetryBudgetMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "replay": {
+              "const": "current-receipt-authorization"
+            },
+            "digest": {
+              "const": "boundary-behavior/1"
+            },
+            "issuedResourceRevision": {
+              "const": "required"
+            },
+            "missingIntent": {
+              "const": "never-create-on-submit"
+            },
+            "resultStorage": {
+              "const": "receipt-reference"
+            },
+            "expiryComparison": {
+              "const": "now-greater-than-or-equal"
+            },
+            "statePolicy": {
+              "const": "intent-state/2"
+            },
+            "readConsistency": {
+              "const": "fresh-local-snapshot"
+            },
+            "replayLock": {
+              "const": "read-only-transaction"
+            },
+            "corruption": {
+              "const": "500-preserve-evidence"
+            }
+          }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "cache",
+        "mode"
+      ],
+      "properties": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "additionalProperties",
+            "required",
+            "properties"
+          ],
+          "properties": {
+            "type": {
+              "const": "object"
+            },
+            "additionalProperties": {
+              "const": false
+            },
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "uniqueItems": true
+            },
+            "properties": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "string"
+                      },
+                      "minLength": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxLength": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "const": {
+                        "type": "string"
+                      },
+                      "enum": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "uniqueItems": true
+                      },
+                      "pattern": {
+                        "enum": [
+                          "^draft_[A-Za-z0-9_-]{1,58}$"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "integer"
+                      },
+                      "minimum": {
+                        "type": "integer"
+                      },
+                      "maximum": {
+                        "type": "integer"
+                      },
+                      "const": {
+                        "type": "integer"
+                      },
+                      "enum": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        },
+                        "minItems": 1,
+                        "uniqueItems": true
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "cache": {
+          "const": "private-no-store"
+        },
+        "mode": {
+          "const": "explicit-projection"
+        }
+      }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "viewSchema",
+        "initialResponse",
+        "intentInitialization",
+        "queryModes",
+        "authorization",
+        "resolver"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/[^\\s?#]*$"
+        },
+        "viewSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "additionalProperties",
+            "required",
+            "properties"
+          ],
+          "properties": {
+            "type": {
+              "const": "object"
+            },
+            "additionalProperties": {
+              "const": false
+            },
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "uniqueItems": true
+            },
+            "properties": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "string"
+                      },
+                      "minLength": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "maxLength": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "const": {
+                        "type": "string"
+                      },
+                      "enum": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "uniqueItems": true
+                      },
+                      "pattern": {
+                        "enum": [
+                          "^draft_[A-Za-z0-9_-]{1,58}$"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "integer"
+                      },
+                      "minimum": {
+                        "type": "integer"
+                      },
+                      "maximum": {
+                        "type": "integer"
+                      },
+                      "const": {
+                        "type": "integer"
+                      },
+                      "enum": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        },
+                        "minItems": 1,
+                        "uniqueItems": true
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "initialResponse": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "renderer"
+          ],
+          "properties": {
+            "status": {
+              "const": 200
+            },
+            "renderer": {
+              "const": "renderStart"
+            }
+          }
+        },
+        "intentInitialization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "location",
+            "method",
+            "path",
+            "csrf",
+            "inputFields",
+            "authorization",
+            "snapshot",
+            "getCreatesIntent"
+          ],
+          "properties": {
+            "status": {
+              "const": 303
+            },
+            "location": {
+              "type": "string",
+              "pattern": "^/[^\\s]*\\{intentId\\}$"
+            },
+            "method": {
+              "const": "POST"
+            },
+            "path": {
+              "const": "/actions/orders/begin-draft"
+            },
+            "csrf": {
+              "const": "session-synchronizer"
+            },
+            "inputFields": {
+              "const": [
+                "productId"
+              ]
+            },
+            "authorization": {
+              "const": "current-product-policy"
+            },
+            "snapshot": {
+              "const": "store-resource-revision"
+            },
+            "getCreatesIntent": {
+              "const": false
+            }
+          }
+        },
+        "queryModes": {
+          "const": [
+            "productId",
+            "intent"
+          ]
+        },
+        "authorization": {
+          "const": "current-product-policy"
+        },
+        "resolver": {
+          "const": "resolvePage"
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "success",
+        "invalid",
+        "receipt",
+        "deniedOrMissing",
+        "otherErrors"
+      ],
+      "properties": {
+        "mode": {
+          "const": "native-html"
+        },
+        "success": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "route",
+            "parameterFrom"
+          ],
+          "properties": {
+            "status": {
+              "const": 303
+            },
+            "route": {
+              "const": "receipt"
+            },
+            "parameterFrom": {
+              "const": "output.orderId"
+            }
+          }
+        },
+        "invalid": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "renderer",
+            "preserve",
+            "keepIntent"
+          ],
+          "properties": {
+            "status": {
+              "const": 422
+            },
+            "renderer": {
+              "const": "renderForm"
+            },
+            "preserve": {
+              "const": "allowed-bounded-raw-values"
+            },
+            "keepIntent": {
+              "const": true
+            }
+          }
+        },
+        "receipt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "path",
+            "load",
+            "authorize",
+            "project",
+            "renderer"
+          ],
+          "properties": {
+            "method": {
+              "const": "GET"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/[^\\s?#]*$"
+            },
+            "load": {
+              "const": "loadReceipt"
+            },
+            "authorize": {
+              "const": "authorizeReceipt"
+            },
+            "project": {
+              "const": "projectReceipt"
+            },
+            "renderer": {
+              "const": "renderReceipt"
+            }
+          }
+        },
+        "deniedOrMissing": {
+          "const": 404
+        },
+        "otherErrors": {
+          "const": "escaped-generic-html"
+        }
+      }
+    },
+    "headers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cacheControl",
+        "contentType",
+        "xContentTypeOptions",
+        "referrerPolicy",
+        "contentSecurityPolicy"
+      ],
+      "properties": {
+        "cacheControl": {
+          "const": "private, no-store"
+        },
+        "contentType": {
+          "const": "text/html; charset=utf-8"
+        },
+        "xContentTypeOptions": {
+          "const": "nosniff"
+        },
+        "referrerPolicy": {
+          "const": "same-origin"
+        },
+        "contentSecurityPolicy": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "operationRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "revision": "0.5.0-design",
+  "method": "read prior archive, primary-source comparison, reproduce four prior reference defects, bounded reference checks; no product or P0 run",
+  "items": [
+    {
+      "id": "V05-01",
+      "finding": "오류 재렌더 중 다른 탭이 완료한 intent를 다시 입력 가능 상태로 보여줄 수 있음",
+      "document": "docs/06_RUNTIME_SECURITY.ko.md",
+      "sources": [
+        "R02",
+        "R41"
+      ],
+      "decision": "adopted-design-change",
+      "resolution": "GET·submit·422 재렌더에서 같은 상태 판정을 사용하고 새 snapshot에서 완료·만료·계약 변경을 다시 확인한다.",
+      "reference": "reference/intent-decisions.ts",
+      "productVerified": false
+    },
+    {
+      "id": "V05-02",
+      "finding": "완료 재응답과 읽기 화면까지 writer 잠금을 요구하거나 오래된 read를 write로 승격할 위험",
+      "document": "docs/07_SQLITE_IDEMPOTENCY.ko.md",
+      "sources": [
+        "R41"
+      ],
+      "decision": "adopted-design-change",
+      "resolution": "완료 조회는 짧은 일관된 read transaction, 신규 쓰기는 종료 후 fresh IMMEDIATE와 전체 재검사로 분리한다.",
+      "reference": "validation/check_sqlite_snapshot.py",
+      "productVerified": false
+    },
+    {
+      "id": "V05-03",
+      "finding": "Result가 object인 역할 조립에서 async execute가 tsc를 통과함",
+      "document": "docs/04_BINDING_TYPES.ko.md",
+      "sources": [
+        "R11",
+        "R43"
+      ],
+      "decision": "adopted-design-change",
+      "resolution": "SyncResult와 동기 반환 가드를 추가하되 미대기 부수효과와 정책 구현은 신뢰 기반 코드로 남긴다.",
+      "reference": "reference/sync-result.ts",
+      "productVerified": false
+    },
+    {
+      "id": "V05-04",
+      "finding": "loadPage의 View|null 타입은 문서의 완료·만료·충돌 HTTP 경로를 표현하지 못함",
+      "document": "docs/04_BINDING_TYPES.ko.md",
+      "sources": [
+        "R02"
+      ],
+      "decision": "adopted-design-change",
+      "resolution": "resolvePage의 start·form·receipt·failure 판별 합집합과 wrapper의 고정 응답 매핑을 도입한다.",
+      "reference": "reference/binding-roles.ts",
+      "productVerified": false
+    },
+    {
+      "id": "V05-05",
+      "finding": "정리 SQL이 결과 없는 consumed intent를 정상 만료처럼 삭제함",
+      "document": "docs/07_SQLITE_IDEMPOTENCY.ko.md",
+      "sources": [
+        "R42"
+      ],
+      "decision": "adopted-design-change",
+      "resolution": "정상 만료만 정리하고 불일치 기록은 500·보존·진단 경로로 유지한다.",
+      "reference": "reference/audit-intent-consistency.sql",
+      "productVerified": false
+    },
+    {
+      "id": "V05-06",
+      "finding": "빈 action 또는 빈 submitter formaction의 문서 URL 의미가 base 상대 해석과 혼동됨",
+      "document": "docs/05_HTML_FORMS_AND_RESPONSES.ko.md",
+      "sources": [
+        "R06",
+        "R45"
+      ],
+      "decision": "adopted-design-change",
+      "resolution": "속성 존재와 빈 값을 구분한다. 비활성 submitter·datalist·0개 경로의 완료 여부도 명시한다.",
+      "reference": "reference/native-target.ts",
+      "productVerified": false
+    },
+    {
+      "id": "V05-07",
+      "finding": "정본 JSON이 중복 키에 대해 parser마다 다른 계약을 만들 수 있음",
+      "document": "docs/03_CONTRACT_AND_SINGLE_SOURCE.ko.md",
+      "sources": [
+        "R44"
+      ],
+      "decision": "adopted-design-change",
+      "resolution": "중복 decoded key·비유한 수·단독 surrogate·한도 초과를 거부한다. 정본은 안전 정수만 허용한다.",
+      "reference": "validation/strict_json.py",
+      "productVerified": false
+    },
+    {
+      "id": "V05-08",
+      "finding": "route path의 단순 슬래시 패턴이 network-path와 정규화 차이를 허용함",
+      "document": "docs/03_CONTRACT_AND_SINGLE_SOURCE.ko.md",
+      "sources": [
+        "R45"
+      ],
+      "decision": "adopted-design-change",
+      "resolution": "동일 origin의 canonical fixed path로 제한하고 미지원 인코딩 경로를 안전으로 판정하지 않는다.",
+      "reference": "reference/native-target.ts",
+      "productVerified": false
+    },
+    {
+      "id": "V05-09",
+      "finding": "coverage 예시의 form ID가 실제 파일과 달라 증거가 잘못 연결됨",
+      "document": "docs/08_DOCTOR_AND_DIAGNOSTICS.ko.md",
+      "sources": [],
+      "decision": "adopted-design-change",
+      "resolution": "실제 HTML form ID와 doctor.config의 독립 연결을 함께 확인하고 예시와 실행 결과를 계속 구분한다.",
+      "reference": "examples/coverage.expected.json",
+      "productVerified": false
+    },
+    {
+      "id": "V05-10",
+      "finding": "반복적인 설계 보강이 P0 제품 가치 비교를 계속 뒤로 미룰 위험",
+      "document": "docs/09_DELIVERY_AND_EXPERIMENTS.ko.md",
+      "sources": [],
+      "decision": "adopted-design-change",
+      "resolution": "P0의 11개 사례·4개 구성을 동결한다. 런타임 참고 보강을 P0 선행 구현 조건이나 추가 발견 성과로 집계하지 않는다.",
+      "reference": "experiments/p0-plan.json",
+      "productVerified": false
+    }
+  ]
+}

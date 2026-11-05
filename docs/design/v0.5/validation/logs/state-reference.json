@@ -1,0 +1,191 @@
+{
+  "node": "v22.16.0",
+  "scope": "pure copied-snapshot decisions, sync-result guard and URL supplied-attribute facts only",
+  "checks": [
+    {
+      "group": "STATE",
+      "id": "missing-unavailable",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "permission-precedes-detail",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "open-view",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "open-needs-input",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "open-invalid",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "open-write-is-only-candidate",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "open-exact-expiry",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "contract-before-input",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "quote-before-input",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "committed-view-price-independent",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "committed-get-new-contract",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "committed-same-replay",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "committed-different-input",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "committed-invalid-not-422",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "committed-post-contract-conflict",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "result-exact-expiry",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "missing-result-is-corruption",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "open-durable-work-is-corruption",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "metadata-mismatch-is-corruption",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "completion-after-open-expiry-is-corruption",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "invalid-clock",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "fresh-state-before-invalid-render",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "fresh-expiry-before-invalid-render",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "STATE",
+      "id": "result-ttl-outlives-open-ttl",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "SYNC",
+      "id": "plain-value",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "SYNC",
+      "id": "promise-rejected",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "SYNC",
+      "id": "thenable-rejected",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "SYNC",
+      "id": "getter-not-called",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "URL",
+      "id": "missing-action-document-not-base",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "URL",
+      "id": "empty-action-document-not-base",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "URL",
+      "id": "relative-action-uses-base",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "URL",
+      "id": "empty-submitter-overrides-form",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "URL",
+      "id": "explicit-submitter-wins",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "URL",
+      "id": "fixed-path-rejects-normalization",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    },
+    {
+      "group": "URL",
+      "id": "fixed-path-current-contract",
+      "status": "VERIFIED_REFERENCE_ONLY"
+    }
+  ],
+  "notRun": [
+    "HTTP coordinator",
+    "authentication",
+    "DB permissions",
+    "HTML parsing",
+    "browser submission",
+    "Doctor",
+    "P0",
+    "performance"
+  ]
+}
