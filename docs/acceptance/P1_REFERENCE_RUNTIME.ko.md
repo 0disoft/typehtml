@@ -1,6 +1,8 @@
 # P1 참조 런타임 실행 기록
 
 - 날짜: 2026-11-05
+- 구현 저장소: `C:/Users/cherr/Documents/workspace/zerodi-wd1/projects/hobby/opensource/typehtml` (독립 git repo, branch `main`)
+- 이 세션의 워크트리 `.worktrees/docs-html-problems`는 문서 작업 위치이며 TypeHTML 구현 대상이 아니다.
 - 대상: `src/runtime/`, `src/adapter/sqlite/`, `src/adapter/hono/`, `src/render/`, `examples/order-app.ts`
 - 설계 기준: `docs/design/v0.5/`
 - 환경: Bun 1.4.4, TypeScript 7.0.2, SQLite(Bun 내장), Windows
