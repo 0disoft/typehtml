@@ -9,8 +9,8 @@ HTML 폼과 서버 경계를 하나의 타입 안전 계약으로 연결하는 �
 - 설계의 P1 참조 세로 조각도 구현했다: order coordinator, Bun SQLite 어댑터, Hono 어댑터, escaped HTML renderer, 실행 가능한 demo server.
 - P0a/P0b B/L/S/D 비교는 실제 대상 프로젝트가 없어 **NOT_RUN**이다. P1 구현은 설계 검증이나 제품 적합성 증거가 아니라 참조 구현이다.
 - 실제 브라우저에서 앱 스크립트 없이 키보드로 폼을 제출하는 흐름과 접근성 트리를 확인했다. 실제 스크린리더 낭독은 실행하지 않았다.
-- 로컬 마이크로벤치, commit 응답 유실 replay, SQLite `VACUUM INTO` 백업 복구를 확인했다. 전원 장애·프로세스 강제 종료 내구성은 주장하지 않는다.
-- 실제 인증 공급자, 다중 인스턴스, rate limit/IP 제한은 P1 참조 범위 밖이다. P0a/P0b는 실제 대상 프로젝트가 없어 실행하지 않았다.
+- 로컬 마이크로벤치, commit 응답 유실 replay, SQLite `VACUUM INTO` 백업 복구, SIGKILL 후 rollback/commit을 확인했다. 전원 손실 내구성은 주장하지 않는다.
+- 외부 IdP/OAuth, 운영 다중 인스턴스 배포, rate limit/IP 제한은 P1 참조 범위 밖이다. P0a/P0b는 실제 대상 프로젝트가 없어 실행하지 않았다.
 - 이 저장소는 아직 SDK나 배포 패키지가 아니다.
 
 ## 먼저 읽을 것
@@ -63,16 +63,17 @@ bun ../../../src/cli.ts doctor --config examples/doctor.config.json
 ```bash
 bun run example
 # http://localhost:3000/login
+# tenant_demo / subject_demo / demo-password
 ```
 
-`DATABASE_PATH`, `PORT`, `ALLOWED_ORIGIN` 환경 변수로 바꿀 수 있다. demo는 in-memory 세션과 단일 상품 seed를 쓰며 운영 인증이 아니다.
+`DATABASE_PATH`, `PORT`, `ALLOWED_ORIGIN`, `DEMO_PASSWORD` 환경 변수로 바꿀 수 있다. demo는 같은 SQLite 파일에 비밀번호 해시(Argon2id), 세션, CSRF 토큰을 저장하고 단일 상품을 seed한다. 로컬 데모용 자격 증명이며 외부 IdP나 운영 인증이 아니다.
 
 Doctor는 stdout에 기계 판독 JSON 보고서 하나를 쓰고, exit code `0`(막는 결함 없음), `1`(확인된 error), `2`(설정/런타임 오류), `3`(필수 경계 미완료)를 쓴다.
 
 ## 알려진 구현 편차
 
 - SQLite `products` 테이블에 설계 스키마에 없는 `name` 컬럼을 추가했다. 공개 화면의 상품명 표시를 위한 어댑터 확장이며 계약 의미에는 쓰지 않는다.
-- Hono demo의 세션·CSRF 저장소는 메모리 구현이다. 실제 로그인·세션 회전·다중 인스턴스 저장소는 범위 밖이다.
+- Hono demo는 로컬 SQLite 자격 증명·세션 저장소를 쓴다. 외부 IdP, OAuth, 다중 테넌트 계정 관리, 세션 회전 API는 범위 밖이다.
 - rate limit, IP 제한, 실제 프록시 신뢰 경계는 구현하지 않았다.
 
 ## 다음 단계
