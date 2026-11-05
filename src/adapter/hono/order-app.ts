@@ -3,9 +3,10 @@ import type { Context } from 'hono';
 import type { LoadedBoundaryContract } from '../../contract/types.ts';
 import { assertCsrfToken, CsrfError } from '../../runtime/csrf.ts';
 import { OrderFailure, type OrderCoordinator } from '../../runtime/order-coordinator.ts';
-import { formReadOptions, readUrlEncodedForm, WireError } from '../../runtime/wire.ts';
+import { assertFormTransport, formReadOptions, readUrlEncodedEntries, readUrlEncodedForm, WireError } from '../../runtime/wire.ts';
 import { acceptsHtml, assertRequestOrigin, NegotiationError } from '../../runtime/negotiation.ts';
 import type { Principal } from '../../runtime/order.ts';
+import { InMemoryActionRateLimiter, type ActionRateLimiter, type RateLimitDecision } from './rate-limit.ts';
 import {
   renderErrorPage,
   renderForm,
@@ -32,6 +33,10 @@ export type OrderAppOptions = Readonly<{
   allowedOrigins: readonly string[];
   credentials?: CredentialStore;
   demo?: Readonly<{ principal: Principal; productId: string }>;
+  rateLimiter?: ActionRateLimiter;
+  /** Optional ingress/IP hook; only the host can determine a trusted client address. */
+  requestLimit?: (request: Request) => RateLimitDecision | Promise<RateLimitDecision>;
+  secureCookies?: boolean;
 }>;
 
 type AppEnv = { Variables: { session: Session } };
@@ -44,20 +49,28 @@ export function createOrderApp(options: OrderAppOptions) {
     productId: 'p_100',
   };
   const constraints = formConstraints(loaded);
+  const rateLimiter = options.rateLimiter ?? new InMemoryActionRateLimiter();
+  const secureCookies = options.secureCookies ?? (options.allowedOrigins.length > 0 && options.allowedOrigins.every((origin) => new URL(origin).protocol === 'https:'));
   const app = new Hono<AppEnv>();
 
   app.use('*', async (c, next) => {
-    await next();
-    c.header('Cache-Control', contract.headers.cacheControl);
-    c.header('X-Content-Type-Options', contract.headers.xContentTypeOptions);
-    c.header('Referrer-Policy', contract.headers.referrerPolicy);
-    c.header('Content-Security-Policy', contract.headers.contentSecurityPolicy);
-    c.header('Content-Type', contract.headers.contentType);
+    try {
+      if (c.req.method === 'POST' && options.requestLimit !== undefined) {
+        assertRateLimit(await options.requestLimit(c.req.raw));
+      }
+      await next();
+    } finally {
+      c.header('Cache-Control', contract.headers.cacheControl);
+      c.header('X-Content-Type-Options', contract.headers.xContentTypeOptions);
+      c.header('Referrer-Policy', contract.headers.referrerPolicy);
+      c.header('Content-Security-Policy', contract.headers.contentSecurityPolicy);
+      c.header('Content-Type', contract.headers.contentType);
+    }
   });
 
   app.onError((error, c) => {
     if (error instanceof OrderFailure) {
-      if (error.status === 503 && error.retryAfterSeconds !== null) {
+      if ((error.status === 503 || error.status === 429) && error.retryAfterSeconds !== null) {
         c.header('Retry-After', String(error.retryAfterSeconds));
       }
       return html(c, error.status, renderErrorPage(error.status, error.code));
@@ -69,27 +82,37 @@ export function createOrderApp(options: OrderAppOptions) {
   });
 
   app.get('/login', (c) => {
+    assertAccept(c.req.raw);
     if (options.credentials !== undefined) return html(c, 200, renderLogin());
     const session = sessions.create(demo.principal);
-    c.header('Set-Cookie', serializeSessionCookie(session.id));
+    const previous = sessionFromRequest(c.req.raw, sessions);
+    if (previous !== null) sessions.revoke?.(previous.id);
+    c.header('Set-Cookie', serializeSessionCookie(session.id, secureCookies));
     return c.redirect(`${contract.page.path}?productId=${encodeURIComponent(demo.productId)}`, 303);
   });
 
   app.post('/login', async (c) => {
     assertAccept(c.req.raw);
+    assertFormTransport(c.req.raw, contract.http.maxBytes);
     assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
     if (options.credentials === undefined) return html(c, 404, renderErrorPage(404, 'NOT_FOUND'));
-    const body = await c.req.parseBody();
-    const tenantId = body.tenantId;
-    const subjectId = body.subjectId;
-    const password = body.password;
+    const entries = await readUrlEncodedEntries(c.req.raw, contract.http);
+    if (entries.some((entry) => !['tenantId', 'subjectId', 'password'].includes(entry.key))) {
+      throw new OrderFailure(400, 'UNKNOWN_FIELD');
+    }
+    const body = new Map(entries.map(({ key, value }) => [key, value]));
+    const tenantId = body.get('tenantId');
+    const subjectId = body.get('subjectId');
+    const password = body.get('password');
     if (typeof tenantId !== 'string' || typeof subjectId !== 'string' || typeof password !== 'string') {
       return html(c, 400, renderLogin('아이디와 비밀번호를 입력해 주세요.'));
     }
     const principal = await options.credentials.verify(tenantId, subjectId, password);
     if (principal === null) return html(c, 401, renderLogin('아이디 또는 비밀번호가 올바르지 않습니다.'));
     const session = sessions.create(principal);
-    c.header('Set-Cookie', serializeSessionCookie(session.id));
+    const previous = sessionFromRequest(c.req.raw, sessions);
+    if (previous !== null) sessions.revoke?.(previous.id);
+    c.header('Set-Cookie', serializeSessionCookie(session.id, secureCookies));
     return c.redirect(`${contract.page.path}?productId=${encodeURIComponent(demo.productId)}`, 303);
   });
 
@@ -97,14 +120,21 @@ export function createOrderApp(options: OrderAppOptions) {
     assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
     const session = requireSession(c, sessions);
     sessions.revoke?.(session.id);
-    c.header('Set-Cookie', clearSessionCookie());
+    c.header('Set-Cookie', clearSessionCookie(secureCookies));
     return c.redirect('/login', 303);
   });
 
-  app.get('/orders/new', (c) => {
+  app.get(contract.page.path, (c) => {
     assertAccept(c.req.raw);
     const session = requireSession(c, sessions);
-    const intentId = c.req.query('intent');
+    const query = new URL(c.req.url).searchParams;
+    if ([...query.keys()].some((key) => key !== 'intent' && key !== 'productId') ||
+        query.getAll('intent').length > 1 || query.getAll('productId').length > 1 ||
+        (query.has('intent') && query.has('productId'))) {
+      throw new OrderFailure(400, 'INVALID_PAGE_QUERY');
+    }
+    const intentId = query.get('intent') ?? undefined;
+    if (intentId === '') throw new OrderFailure(400, 'INVALID_PAGE_QUERY');
     if (intentId !== undefined) {
       const page = coordinator.resolvePage(session.principal, { kind: 'intent', intentId });
       if (page.kind === 'form') {
@@ -126,15 +156,15 @@ export function createOrderApp(options: OrderAppOptions) {
         );
       }
       if (page.kind === 'receipt') {
-        return c.redirect(`/orders/drafts/${encodeURIComponent(page.output.orderId)}`, 303);
+        return c.redirect(receiptLocation(page.output.orderId), 303);
       }
       if (page.kind === 'failure') {
         return html(c, page.status, renderErrorPage(page.status, page.code));
       }
       return html(c, 500, renderErrorPage(500, 'INTERNAL_ERROR'));
     }
-    const productId = c.req.query('productId');
-    if (productId === undefined) return html(c, 400, renderErrorPage(400, 'PRODUCT_REQUIRED'));
+    const productId = query.get('productId');
+    if (productId === null || productId === '') return html(c, 400, renderErrorPage(400, 'PRODUCT_REQUIRED'));
     const page = coordinator.resolvePage(session.principal, { kind: 'product', productId });
     if (page.kind === 'start') {
       return html(c, 200, renderStart(page.view, session.csrfToken, contract.page.intentInitialization.path));
@@ -147,6 +177,7 @@ export function createOrderApp(options: OrderAppOptions) {
 
   app.post(contract.page.intentInitialization.path, async (c) => {
     assertAccept(c.req.raw);
+    assertFormTransport(c.req.raw, contract.http.maxBytes);
     assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
     const session = requireSession(c, sessions);
     const parsed = await readUrlEncodedForm(
@@ -154,14 +185,17 @@ export function createOrderApp(options: OrderAppOptions) {
       formReadOptions(contract.http, contract.protocol, false),
     );
     assertCsrfToken(parsed.csrf, session.csrfToken);
+    if (Object.keys(parsed.fields).some((key) => key !== 'productId')) throw new OrderFailure(400, 'UNKNOWN_FIELD');
     const productId = parsed.fields.productId;
     if (productId === undefined) throw new OrderFailure(400, 'PRODUCT_REQUIRED');
+    assertRateLimit(await rateLimiter.consume({ principal: session.principal, actionId: contract.id, phase: 'begin' }));
     const result = await coordinator.beginDraft(session.principal, productId);
     return c.redirect(result.location, 303);
   });
 
   app.post(contract.http.path, async (c) => {
     assertAccept(c.req.raw);
+    assertFormTransport(c.req.raw, contract.http.maxBytes);
     assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
     const session = requireSession(c, sessions);
     const parsed = await readUrlEncodedForm(
@@ -169,6 +203,7 @@ export function createOrderApp(options: OrderAppOptions) {
       formReadOptions(contract.http, contract.protocol, true),
     );
     assertCsrfToken(parsed.csrf, session.csrfToken);
+    assertRateLimit(await rateLimiter.consume({ principal: session.principal, actionId: contract.id, phase: 'submit' }));
     const intentId = parsed.requestKey;
     if (intentId === null) throw new OrderFailure(400, 'MISSING_REQUEST_KEY');
     try {
@@ -177,6 +212,12 @@ export function createOrderApp(options: OrderAppOptions) {
     } catch (error) {
       if (error instanceof OrderFailure && error.status === 422 && error.formState !== null) {
         const page = coordinator.resolvePage(session.principal, { kind: 'intent', intentId });
+        if (page.kind === 'failure') throw new OrderFailure(page.status, page.code);
+        if (page.kind === 'receipt') {
+          return html(c, 409, renderErrorPage(409, 'COMPLETED_INPUT_CONFLICT', {
+            href: receiptLocation(page.output.orderId), label: '완료한 주문 확인',
+          }));
+        }
         if (page.kind !== 'form') throw error;
         const state = { ...error.formState, csrfToken: session.csrfToken };
         return html(c, 422, renderForm(page.view, state, contract.http.path, constraints));
@@ -198,7 +239,30 @@ export function createOrderApp(options: OrderAppOptions) {
     }
   });
 
+  for (const [path, allow] of [
+    [contract.page.path, 'GET, HEAD'],
+    [contract.response.receipt.path, 'GET, HEAD'],
+    [contract.page.intentInitialization.path, 'POST'],
+    [contract.http.path, 'POST'],
+  ] as const) {
+    app.all(path, (c) => {
+      c.header('Allow', allow);
+      return html(c, 405, renderErrorPage(405, 'METHOD_NOT_ALLOWED'));
+    });
+  }
   return app;
+
+  function receiptLocation(orderId: string): string {
+    return contract.response.receipt.path.replace(':orderId', encodeURIComponent(orderId));
+  }
+}
+
+function assertRateLimit(decision: RateLimitDecision): void {
+  if (!decision.allow) {
+    const seconds = decision.retryAfterSeconds;
+    if (!Number.isSafeInteger(seconds) || seconds <= 0) throw new Error('INVALID_RATE_LIMIT_RESULT');
+    throw new OrderFailure(429, 'RATE_LIMITED', { retryAfterSeconds: seconds });
+  }
 }
 
 function formConstraints(loaded: LoadedBoundaryContract): FormConstraints {
@@ -230,12 +294,12 @@ function sessionFromRequest(request: Request, sessions: SessionStore): Session |
   return null;
 }
 
-function serializeSessionCookie(sessionId: string): string {
-  return `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax`;
+function serializeSessionCookie(sessionId: string, secure: boolean): string {
+  return `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
 }
 
-function clearSessionCookie(): string {
-  return `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`;
+function clearSessionCookie(secure: boolean): string {
+  return `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
 }
 
 function assertAccept(request: Request): void {

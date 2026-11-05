@@ -20,7 +20,11 @@ const principal: Principal = {
   tenantId: 'tenant_demo',
   sessionId: 'session_demo',
 };
-const store = new SqliteOrderStore(databasePath);
+const loaded = await loadBoundaryContract(contractPath);
+const store = new SqliteOrderStore(databasePath, {
+  busyRetryBudgetMs: loaded.contract.guards.idempotency.busyRetryBudgetMs,
+  retryAfterSeconds: loaded.contract.guards.idempotency.retryAfterSeconds,
+});
 store.seedMembership(principal.tenantId, principal.subjectId, true);
 store.seedProduct({
   id: 'p_100',
@@ -31,7 +35,6 @@ store.seedProduct({
   priceMinor: 12000,
   currency: 'KRW',
 });
-const loaded = await loadBoundaryContract(contractPath);
 const coordinator = new OrderCoordinator({
   loaded,
   bindings: createOrderBindings(),

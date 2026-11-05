@@ -33,12 +33,12 @@ ${body}
 }
 
 function money(minor: number, currency: string): string {
-  return `${escapeHtml(currency)} ${String(minor)}`;
+  return `${escapeHtml(currency)} ${escapeHtml(String(minor))}`;
 }
 
-function fieldErrors(errors: readonly string[] | undefined): string {
+function fieldErrors(id: string, errors: readonly string[] | undefined): string {
   if (errors === undefined || errors.length === 0) return '';
-  return `<p class="field-error" role="alert">${errors.map((error) => escapeHtml(error)).join(', ')}</p>`;
+  return `<p id="${id}" class="field-error">${errors.map((error) => escapeHtml(error)).join(', ')}</p>`;
 }
 
 export function renderLogin(message?: string): string {
@@ -64,7 +64,7 @@ export function renderStart(view: OrderPageView, csrfToken: string, beginPath: s
     `<h1>주문 시작</h1>
 <p>${escapeHtml(view.productName)}</p>
 <p>단가: ${money(view.unitPriceMinor, view.currency)}</p>
-<form method="post" action="${escapeHtml(beginPath)}">
+<form id="begin-draft" method="post" action="${escapeHtml(beginPath)}" enctype="application/x-www-form-urlencoded" accept-charset="UTF-8">
 <input type="hidden" name="_bc_csrf" value="${escapeHtml(csrfToken)}">
 <input type="hidden" name="productId" value="${escapeHtml(view.productId)}">
 <button type="submit">주문서 작성</button>
@@ -81,30 +81,41 @@ export function renderForm(
   const quantity = state.rawValues.quantity ?? '2';
   const quantityInvalid = (state.fieldErrors.quantity ?? []).length > 0;
   const productInvalid = (state.fieldErrors.productId ?? []).length > 0;
+  const pattern = constraints.minQuantity === 1 && constraints.maxQuantity === 20
+    ? '([1-9]|1[0-9]|20)'
+    : '(0|-?[1-9][0-9]*)';
+  const maxLength = Math.max(String(constraints.minQuantity).length, String(constraints.maxQuantity).length);
+  const hasErrors = quantityInvalid || productInvalid || state.formErrors.length > 0;
   return page(
-    '주문서',
+    hasErrors ? '입력값을 확인해 주세요' : '주문서',
     `<h1>주문서</h1>
 <p>${escapeHtml(view.productName)}</p>
 <p>단가: ${money(view.unitPriceMinor, view.currency)}</p>
-${state.formErrors.length > 0 ? `<p role="alert">${state.formErrors.map(escapeHtml).join(', ')}</p>` : ''}
-<form method="post" action="${escapeHtml(actionPath)}">
+${hasErrors ? `<section aria-labelledby="errors-title" role="alert"><h2 id="errors-title">수정할 항목</h2>
+${quantityInvalid ? `<p><a href="#quantity">수량: ${(state.fieldErrors.quantity ?? []).map(escapeHtml).join(', ')}</a></p>` : ''}
+${productInvalid ? `<p>상품: ${(state.fieldErrors.productId ?? []).map(escapeHtml).join(', ')}</p>` : ''}
+${state.formErrors.map((error) => `<p>${escapeHtml(error)}</p>`).join('')}
+</section>` : ''}
+<form id="create-draft" method="post" action="${escapeHtml(actionPath)}" enctype="application/x-www-form-urlencoded" accept-charset="UTF-8">
 <input type="hidden" name="_bc_csrf" value="${escapeHtml(state.csrfToken)}">
 <input type="hidden" name="_bc_request" value="${escapeHtml(state.intentId)}">
 <input type="hidden" name="productId" value="${escapeHtml(view.productId)}">
 <label for="quantity">수량</label>
+<p id="quantity-hint">${constraints.minQuantity}부터 ${constraints.maxQuantity}까지의 정수를 입력하세요. 지수·소수 표기는 사용할 수 없습니다.</p>
 <input
   id="quantity"
   name="quantity"
-  type="number"
+  type="text"
   inputmode="numeric"
-  min="${constraints.minQuantity}"
-  max="${constraints.maxQuantity}"
+  pattern="${pattern}"
+  maxlength="${maxLength}"
+  aria-describedby="quantity-hint${quantityInvalid ? ' quantity-error' : ''}"
   value="${escapeHtml(quantity)}"
   required
   ${quantityInvalid ? 'aria-invalid="true"' : ''}
 >
-${fieldErrors(state.fieldErrors.quantity)}
-${productInvalid ? fieldErrors(state.fieldErrors.productId) : ''}
+${fieldErrors('quantity-error', state.fieldErrors.quantity)}
+${productInvalid ? fieldErrors('productId-error', state.fieldErrors.productId) : ''}
 <button type="submit">주문 확정</button>
 </form>`,
   );
@@ -120,11 +131,22 @@ export function renderReceipt(receipt: PublicReceipt): string {
   );
 }
 
-export function renderErrorPage(status: number, message: string): string {
+export function renderErrorPage(
+  status: number,
+  message: string,
+  link?: Readonly<{ href: string; label: string }>,
+): string {
+  const guidance = status === 409 || status === 410
+    ? '상품 안내 화면으로 돌아가 현재 가격을 확인한 뒤 새 주문서를 시작해 주세요. 완료한 주문이 있다면 영수증을 확인해 주세요.'
+    : status === 429 || status === 503
+      ? '잠시 후 같은 주문서에서 다시 시도해 주세요. 처리 결과를 확인하기 전에 새 주문서를 만들지 마세요.'
+      : '';
   return page(
     '요청을 처리할 수 없습니다',
     `<h1>요청을 처리할 수 없습니다</h1>
 <p>상태: ${status}</p>
-<p>${escapeHtml(message)}</p>`,
+<p>${escapeHtml(message)}</p>
+${guidance === '' ? '' : `<p>${guidance}</p>`}
+${link === undefined ? '' : `<p><a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a></p>`}`,
   );
 }
