@@ -54,17 +54,45 @@ function formBody(values: Record<string, string>): string {
   return new URLSearchParams(values).toString();
 }
 
+function encodedBody(text: string): ArrayBuffer {
+  const bytes = new TextEncoder().encode(text);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 function post(app: ReturnType<typeof createOrderApp>, path: string, cookie: string, body: string) {
+  return postRaw(app, path, cookie, body, { origin: ORIGIN });
+}
+
+function postRaw(
+  app: ReturnType<typeof createOrderApp>,
+  path: string,
+  cookie: string,
+  body: string | ArrayBuffer,
+  headers: Record<string, string>,
+) {
   return app.request(path, {
     method: 'POST',
     headers: {
       cookie,
-      origin: ORIGIN,
       accept: 'text/html',
       'content-type': FORM,
+      ...headers,
     },
     body,
   });
+}
+
+async function begin(app: ReturnType<typeof createOrderApp>, cookie: string, csrfToken: string) {
+  const response = await post(
+    app,
+    '/actions/orders/begin-draft',
+    cookie,
+    formBody({ _bc_csrf: csrfToken, productId: 'p_100' }),
+  );
+  if (response.status !== 303) throw new Error('failed to begin: ' + response.status);
+  const location = response.headers.get('location');
+  if (location === null) throw new Error('missing intent location');
+  return decodeURIComponent(location.split('intent=')[1]!);
 }
 
 describe('Hono order adapter', () => {
@@ -182,5 +210,157 @@ describe('Hono order adapter', () => {
       body: formBody({ _bc_csrf: 'x', productId: 'p_100' }),
     });
     expect(response.status).toBe(401);
+  });
+});
+
+describe('request-case matrix', () => {
+  const malformed: readonly { case: string; body: string; status: number }[] = [
+    { case: 'duplicate', body: 'quantity=1&quantity=2', status: 400 },
+    { case: 'unknown-owner', body: 'ownerId=someone', status: 400 },
+    { case: 'proto', body: '__proto__=x', status: 400 },
+    { case: 'unknown-reserved', body: '_bc_admin=1', status: 400 },
+    { case: 'legacy-reserved', body: '_th_request=old', status: 400 },
+    { case: 'malformed-percent', body: 'quantity=%G1', status: 400 },
+    { case: 'encoded-duplicate', body: 'quantity=1&%71uantity=2', status: 400 },
+    { case: 'exponent', body: 'quantity=1e1', status: 422 },
+    { case: 'empty-quantity', body: 'quantity=', status: 422 },
+  ];
+
+  for (const item of malformed) {
+    it('returns ' + item.status + ' for ' + item.case, async () => {
+      const { app, cookie, session } = await setup();
+      const intentId = await begin(app, cookie, session.csrfToken);
+      const response = await post(
+        app,
+        '/actions/orders/create-draft',
+        cookie,
+        '_bc_csrf=' + session.csrfToken +
+          '&_bc_request=' + encodeURIComponent(intentId) +
+          '&productId=p_100&' + item.body,
+      );
+      expect(response.status).toBe(item.status);
+    });
+  }
+
+  it('rejects bad CSRF, multipart, invalid UTF-8, and oversized bodies', async () => {
+    const { app, cookie, session } = await setup();
+    const intentId = await begin(app, cookie, session.csrfToken);
+
+    const csrf = await post(
+      app,
+      '/actions/orders/create-draft',
+      cookie,
+      formBody({ _bc_csrf: 'wrong', _bc_request: intentId, productId: 'p_100', quantity: '2' }),
+    );
+    expect(csrf.status).toBe(403);
+
+    const multipart = await app.request('/actions/orders/create-draft', {
+      method: 'POST',
+      headers: { cookie, origin: ORIGIN, accept: 'text/html', 'content-type': 'multipart/form-data' },
+      body: 'x',
+    });
+    expect(multipart.status).toBe(415);
+
+    const invalidUtf8 = await postRaw(
+      app,
+      '/actions/orders/create-draft',
+      cookie,
+      encodedBody(
+        '_bc_csrf=' + session.csrfToken +
+          '&_bc_request=' + encodeURIComponent(intentId) +
+          '&productId=%FF',
+      ),
+      { origin: ORIGIN },
+    );
+    expect(invalidUtf8.status).toBe(400);
+
+    const oversized = await post(
+      app,
+      '/actions/orders/create-draft',
+      cookie,
+      formBody({
+        _bc_csrf: session.csrfToken,
+        _bc_request: intentId,
+        productId: 'p_100',
+        quantity: '2',
+        padding: 'x'.repeat(17_000),
+      }),
+    );
+    expect(oversized.status).toBe(413);
+  });
+
+  it('returns 410 for an unknown intent', async () => {
+    const { app, cookie, session } = await setup();
+    const response = await post(
+      app,
+      '/actions/orders/create-draft',
+      cookie,
+      formBody({
+        _bc_csrf: session.csrfToken,
+        _bc_request: 'intent_00000000-0000-0000-0000-000000000000',
+        productId: 'p_100',
+        quantity: '2',
+      }),
+    );
+    expect(response.status).toBe(410);
+  });
+
+  it('replays the same receipt but rejects different committed input', async () => {
+    const { app, cookie, session } = await setup();
+    const intentId = await begin(app, cookie, session.csrfToken);
+    const fieldset = (quantity: string) =>
+      formBody({ _bc_csrf: session.csrfToken, _bc_request: intentId, productId: 'p_100', quantity });
+    expect((await post(app, '/actions/orders/create-draft', cookie, fieldset('2'))).status).toBe(303);
+    expect((await post(app, '/actions/orders/create-draft', cookie, fieldset('2'))).status).toBe(303);
+    expect((await post(app, '/actions/orders/create-draft', cookie, fieldset('3'))).status).toBe(409);
+    expect((await post(app, '/actions/orders/create-draft', cookie, fieldset('not-an-integer'))).status).toBe(409);
+  });
+
+  it('rejects a product from another tenant', async () => {
+    const { app, cookie, session, store } = await setup();
+    store.seedProduct({ ...product, id: 'p_200', tenantId: 'tenant_2', revision: 1 });
+    const response = await post(
+      app,
+      '/actions/orders/begin-draft',
+      cookie,
+      formBody({ _bc_csrf: session.csrfToken, productId: 'p_200' }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it('accepts same-origin Referer without Origin and rejects no source', async () => {
+    const { app, cookie, session } = await setup();
+    const referer = await postRaw(
+      app,
+      '/actions/orders/begin-draft',
+      cookie,
+      formBody({ _bc_csrf: session.csrfToken, productId: 'p_100' }),
+      { referer: ORIGIN + '/orders/new?productId=p_100' },
+    );
+    expect(referer.status).toBe(303);
+
+    const missing = await postRaw(
+      app,
+      '/actions/orders/begin-draft',
+      cookie,
+      formBody({ _bc_csrf: session.csrfToken, productId: 'p_100' }),
+      {},
+    );
+    expect(missing.status).toBe(403);
+  });
+
+  it('revokes receipt access after membership is deactivated', async () => {
+    const { app, cookie, session, store } = await setup();
+    const intentId = await begin(app, cookie, session.csrfToken);
+    const submit = await post(
+      app,
+      '/actions/orders/create-draft',
+      cookie,
+      formBody({ _bc_csrf: session.csrfToken, _bc_request: intentId, productId: 'p_100', quantity: '2' }),
+    );
+    expect(submit.status).toBe(303);
+    const location = submit.headers.get('location')!;
+    store.seedMembership('tenant_1', 'subject_1', false);
+    expect((await app.request(location, { headers: { cookie, accept: 'text/html' } })).status).toBe(404);
   });
 });
