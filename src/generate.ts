@@ -1,7 +1,8 @@
 import { mkdir, readFile, readdir, rename, rm, rmdir, writeFile, lstat, realpath } from 'node:fs/promises';
 import { dirname, relative, resolve, basename, isAbsolute, sep } from 'node:path';
-import { generateContractArtifacts } from './contract/generate.ts';
-import { loadBoundaryContract } from './contract/load.ts';
+import { createArtifactBundle } from './generate-artifacts.ts';
+import { readBoundedJsonBytes } from './contract/strict-json.ts';
+import { sourceSha256 } from './contract/behavior.ts';
 
 export type GenerateOptions = Readonly<{ contractPath: string; outDir: string; rootDir?: string; check?: boolean }>;
 export type GenerationResult = Readonly<{
@@ -10,13 +11,14 @@ export type GenerationResult = Readonly<{
   files: readonly string[];
 }>;
 
-const FILES = ['order-contract.ts', 'form-check.generated.json', 'start-form-check.generated.json', 'contract-digests.generated.json'] as const;
+const FILES = ['order-contract.ts', 'form-types.ts', 'form-definition.ts', 'form-check.generated.json', 'start-form-check.generated.json', 'contract-digests.generated.json'] as const;
 
 /** Replace only a dedicated generated directory, preserving unrelated files by refusing mixed output. */
 export async function generateFiles(options: GenerateOptions): Promise<GenerationResult> {
   const sourcePath = await realpath(resolve(options.contractPath));
   const outDir = resolve(options.outDir);
-  const designDir = resolve(import.meta.dir, '../docs/design');
+  const rootDir = await realpath(resolve(options.rootDir ?? process.cwd()));
+  const designDir = resolve(rootDir, 'docs/design');
   const designRelative = relative(designDir, outDir);
   if (isContained(designRelative)) {
     throw new Error('design snapshots are immutable; choose a generated output directory');
@@ -25,19 +27,13 @@ export async function generateFiles(options: GenerateOptions): Promise<Generatio
   if (isContained(sourceRelative)) {
     throw new Error('the authoritative source must be outside the generated output directory');
   }
-  const rootDir = await realpath(resolve(options.rootDir ?? process.cwd()));
   const sourceFromRoot = relative(rootDir, sourcePath);
   if (!isContained(sourceFromRoot)) throw new Error('authoritative source is outside --root');
-  const loaded = await loadBoundaryContract(sourcePath);
-  const artifacts = generateContractArtifacts(loaded, {
-    sourcePath: sourceFromRoot.replaceAll('\\', '/'), sourceSha256: loaded.sourceSha256,
-  });
-  const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
-  const content = [artifacts.types, json(artifacts.formCheck), json(artifacts.startFormCheck), json(artifacts.digests)];
+  const artifacts = await createArtifactBundle(sourcePath, sourceFromRoot.replaceAll('\\', '/'));
   const stale: string[] = [];
-  for (const [index, file] of FILES.entries()) {
+  for (const [file, content] of artifacts.files) {
     try {
-      if (await readFile(resolve(outDir, file), 'utf8') !== content[index]) stale.push(file);
+      if (await readFile(resolve(outDir, file), 'utf8') !== content) stale.push(file);
     } catch (error) {
       if (!isMissing(error)) throw error;
       stale.push(file);
@@ -53,7 +49,9 @@ export async function generateFiles(options: GenerateOptions): Promise<Generatio
   if (isContained(relative(actualOut, sourcePath))) {
     throw new Error('the authoritative source resolves inside the generated output directory');
   }
-  const actualRelative = relative(await realpath(designDir), actualOut);
+  let actualDesign = designDir;
+  try { actualDesign = await realpath(designDir); } catch (error) { if (!isMissing(error)) throw error; }
+  const actualRelative = relative(actualDesign, actualOut);
   if (isContained(actualRelative)) {
     throw new Error('generated output resolves into an immutable design snapshot');
   }
@@ -75,8 +73,8 @@ export async function generateFiles(options: GenerateOptions): Promise<Generatio
   await mkdir(stage);
   let backedUp = false;
   try {
-    for (const [index, file] of FILES.entries()) await writeFile(resolve(stage, file), content[index]!);
-    if ((await loadBoundaryContract(sourcePath)).sourceSha256 !== loaded.sourceSha256) {
+    for (const [file, content] of artifacts.files) await writeFile(resolve(stage, file), content);
+    if (sourceSha256(await readBoundedJsonBytes(sourcePath)) !== artifacts.sourceSha256) {
       throw new Error('authoritative contract changed during generation; retry');
     }
     if (exists) { await rename(outDir, backup); backedUp = true; }
@@ -87,7 +85,7 @@ export async function generateFiles(options: GenerateOptions): Promise<Generatio
       throw error;
     }
     if (backedUp) await removeGeneratedDirectory(backup);
-    return { format: 'boundary-generation/1', status: 'written', files: [...FILES] };
+    return { format: 'boundary-generation/1', status: 'written', files: [...artifacts.files.keys()] };
   } finally {
     await removeGeneratedDirectory(stage);
   }

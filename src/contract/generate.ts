@@ -45,7 +45,7 @@ function scalarType(schema: FieldSchema): string {
   return schema.type === 'string' ? 'string' : 'number';
 }
 
-function objectType(name: string, schema: ObjectSchema, pointer: string): string {
+export function generateSchemaType(name: string, schema: ObjectSchema, pointer: string): string {
   const required = new Set(schema.required);
   const fields = Object.entries(schema.properties).map(([key, value]) =>
     `  readonly ${literal(key)}${required.has(key) ? '' : '?'}: ${scalarType(value)};`,
@@ -81,9 +81,9 @@ export function generateContractArtifacts(
     `// GENERATED from ${options.sourcePath}; do not edit.\n`,
     `// Source SHA256: ${loaded.sourceSha256}\n`,
     '// Numeric/string constraints remain runtime responsibilities.\n',
-    objectType(names.input, contract.input.schema, '/input/schema'),
-    objectType(names.output, contract.output.schema, '/output/schema'),
-    objectType(names.pageView, contract.page.viewSchema, '/page/viewSchema'),
+    generateSchemaType(names.input, contract.input.schema, '/input/schema'),
+    generateSchemaType(names.output, contract.output.schema, '/output/schema'),
+    generateSchemaType(names.pageView, contract.page.viewSchema, '/page/viewSchema'),
   ].join('');
   return {
     types,

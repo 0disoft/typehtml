@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { readStrictJson } from '../contract/strict-json.ts';
 import { loadBoundaryContract, loadFormCheck } from '../contract/load.ts';
 import { verifyFormCheckSource } from '../contract/project.ts';
+import { FORM_FORMAT, loadForm, verifyFormSource } from '../form/index.ts';
 import type { JsonObject, JsonValue } from '../contract/strict-json.ts';
 import type { FormCheck } from '../contract/types.ts';
 import type {
@@ -123,7 +124,12 @@ export async function loadDoctorConfig(configPath: string): Promise<LoadedDoctor
       const realSourcePath = await realpath(sourcePath);
       withinRoot(realBaseDir, realSourcePath);
       if ((await stat(realSourcePath)).size > MAX_DOCUMENT_BYTES) throw new Error('authoritative source exceeds the file size limit');
-      verifyFormCheckSource(loaded.formCheck, await loadBoundaryContract(realSourcePath));
+      const source = await readStrictJson(realSourcePath, { integerOnly: true });
+      if (source !== null && typeof source === 'object' && !Array.isArray(source) && source.format === FORM_FORMAT) {
+        verifyFormSource(loaded.formCheck, await loadForm(realSourcePath));
+      } else {
+        verifyFormCheckSource(loaded.formCheck, await loadBoundaryContract(realSourcePath));
+      }
     } catch (error) {
       if (error instanceof DoctorConfigError) throw error;
       sourceIssues.set(loaded.formCheck.action.id, error instanceof Error ? error.message : 'authoritative source cannot be verified');

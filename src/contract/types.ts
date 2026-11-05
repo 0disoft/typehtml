@@ -211,7 +211,7 @@ export interface FormCheckAction {
 
 export interface FormCheck {
   readonly format: typeof FORM_CHECK_FORMAT;
-  readonly status: 'generated-design-reference-not-product-output';
+  readonly status: 'generated' | 'generated-design-reference-not-product-output';
   readonly source: FormCheckSource;
   readonly action: FormCheckAction;
   readonly input: InputContract;

@@ -5,10 +5,44 @@ import { join, resolve } from 'node:path';
 import { generateFiles } from '../src/generate.ts';
 import { loadBoundaryContract, loadFormCheck } from '../src/contract/load.ts';
 import { verifyFormCheckSource } from '../src/contract/project.ts';
+import { runDoctor } from '../src/doctor/analyze.ts';
 
 const CONTRACT = resolve(import.meta.dir, '../docs/design/v0.5/examples/order.boundary.json');
 
 describe('generation delivery', () => {
+  it('generates and verifies a generic manifest in a project without the repository design tree', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'typehtml-generic-generation-'));
+    try {
+      const contractPath = join(directory, 'form.json');
+      const definition = { format: 'typehtml-form/1', id: 'newsletter.subscribe', path: '/subscribe',
+        input: { type: 'object', additionalProperties: false, required: ['email'], properties: { email: { type: 'string', minLength: 1, maxLength: 80 } } },
+        output: { type: 'object', additionalProperties: false, required: ['status'], properties: { status: { type: 'string', const: 'subscribed' } } },
+      };
+      await writeFile(contractPath, JSON.stringify(definition));
+      const options = { contractPath, outDir: join(directory, 'generated'), rootDir: directory };
+      const generated = await generateFiles(options);
+      expect(generated.files).toContain('form-definition.ts');
+      expect(generated.files).toContain('form-types.ts');
+      expect(generated.files).not.toContain('order-contract.ts');
+      expect((await generateFiles({ ...options, check: true })).status).toBe('current');
+      await writeFile(join(directory, 'index.html'), '<form id="newsletter" action="/subscribe" method="post"><input name="_bc_csrf" type="hidden" value="synthetic"><input name="email"><button>Subscribe</button></form>');
+      const configPath = join(directory, 'doctor.json');
+      await writeFile(configPath, JSON.stringify({ format: 'boundary-doctor/0.5-draft', root: directory,
+        inputs: [{ kind: 'form-projection', path: 'generated/form-check.generated.json' }],
+        documents: [{ path: 'index.html', documentUrl: 'https://example.invalid/', sourceKind: 'rendered-snapshot', executionAssumption: 'native-no-script-by-example', bindings: [{ formId: 'newsletter', actionId: 'newsletter.subscribe', required: true }] }],
+      }));
+      expect((await runDoctor(configPath)).exitCode).toBe(0);
+      definition.input.properties.email.maxLength = 40;
+      await writeFile(contractPath, JSON.stringify(definition));
+      expect((await generateFiles({ ...options, check: true })).status).toBe('stale');
+      const stale = await runDoctor(configPath);
+      expect(stale.exitCode).toBe(3);
+      expect(stale.findings.some((finding) => finding.ruleId === 'BC193')).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('checks freshness, regenerates the complete bundle, and preserves unrelated output', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'typehtml-generation-'));
     try {

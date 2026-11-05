@@ -834,7 +834,9 @@ export function validateFormCheck(value: JsonValue): FormCheck {
     ['format', 'status', 'source', 'action', 'input', 'protocolFields'],
   );
   expectLiteral(obj.format, FORM_CHECK_FORMAT, '/format');
-  expectLiteral(obj.status, 'generated-design-reference-not-product-output', '/status');
+  if (obj.status !== 'generated' && obj.status !== 'generated-design-reference-not-product-output') {
+    fail('INVALID_VALUE', '/status', 'expected a generated form projection');
+  }
   const source = validateFormCheckSource(obj.source, '/source');
   const action = validateFormCheckAction(obj.action, '/action');
   const input = validateInputContract(obj.input, '/input');
@@ -849,7 +851,7 @@ export function validateFormCheck(value: JsonValue): FormCheck {
   }
   return {
     format: FORM_CHECK_FORMAT,
-    status: 'generated-design-reference-not-product-output',
+    status: obj.status,
     source,
     action,
     input,
