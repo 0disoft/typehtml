@@ -1,16 +1,37 @@
 {
-  "name": "typehtml",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@0disoft/typehtml",
+  "version": "0.1.0-alpha.1",
   "type": "module",
-  "description": "HTML form and server boundary contracts",
-  "license": "UNLICENSED",
+  "description": "Typed native HTML forms, server validation, and form contract diagnostics",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/0disoft/typehtml.git" },
+  "homepage": "https://github.com/0disoft/typehtml#readme",
+  "bugs": { "url": "https://github.com/0disoft/typehtml/issues" },
+  "keywords": ["html", "forms", "typescript", "validation", "bun", "hono"],
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./contract": { "types": "./dist/contract/index.d.ts", "import": "./dist/contract/index.js" },
+    "./doctor": { "types": "./dist/doctor/index.d.ts", "import": "./dist/doctor/index.js" },
+    "./runtime": { "types": "./dist/runtime/index.d.ts", "import": "./dist/runtime/index.js" },
+    "./reference/order": { "types": "./dist/reference/order.d.ts", "bun": "./dist/reference/order.js", "default": "./dist/reference/unsupported.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md", "docs/GETTING_STARTED.md", "docs/API.md"],
+  "publishConfig": { "access": "public", "tag": "alpha", "registry": "https://registry.npmjs.org/" },
   "engines": {
+    "node": ">=22.0.0",
     "bun": ">=1.4.0"
   },
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "build": "bun scripts/build.ts",
+    "prepack": "bun run build",
+    "pack": "bun scripts/pack.ts",
+    "package:smoke": "bun scripts/package-smoke.ts",
     "doctor": "bun src/cli.ts doctor",
     "generate": "bun src/cli.ts generate --contract docs/design/v0.5/examples/order.boundary.json --out-dir src/generated",
     "generate:check": "bun run generate --check",
@@ -22,7 +43,8 @@
     "parse5": "^7"
   },
   "bin": {
-    "boundary": "src/cli.ts"
+    "typehtml": "dist/cli.js",
+    "boundary": "dist/cli.js"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
