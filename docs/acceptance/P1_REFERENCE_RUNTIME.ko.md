@@ -6,7 +6,8 @@
 - 대상: `src/runtime/`, `src/adapter/sqlite/`, `src/adapter/hono/`, `src/render/`, `examples/order-app.ts`
 - 설계 기준: `docs/design/v0.5/`
 - 환경: Bun 1.4.4, TypeScript 7.0.2, SQLite(Bun 내장), Windows
-- 판정: **참조 구현 실행됨.** P0a/P0b는 실제 대상이 없어 **판단 보류**다(`P0_DECISION.ko.md`). 제품 적합성 주장으로 쓰지 않는다.
+- 판정: **참조 구현 실행됨.** P0a/P0b는 실제 대상이 없어 기술적으로 **판단 보류**이며, 2026-11-06 목표 소유자가 **범위 밖**으로 확정했다(`P0_DECISION.ko.md`). 제품 적합성 주장으로 쓰지 않는다.
+- 범위 확정: 2026-11-06, 목표 소유자(제로디)가 "P0와 전원 손실은 범위 밖"이라고 확인했다.
 
 이 문서는 실행한 것과 실행하지 않은 것을 구분한다. P1 구현이 P0a/P0b의 B/L/S/D 비교를 대체하지 않는다.
 
@@ -39,23 +40,23 @@
 | 조작 요청 | 확인 | 미등록 key, 중복 entry, 잘못된 Origin, JSON Accept, 세션 없음, bad CSRF, 초과 스트림 413, 지수 422, malformed percent/UTF-8, encoded duplicate, prefetch/HEAD/GET의 새 intent 0, begin POST 1, exact expiry 410, consumed-without-result 500 확인 |
 | 현재 권한 | 부분 확인 | membership 없음, 다른 tenant 상품 404, 비활성 상품, 영수증 권한 철회 404, 로컬 비밀번호 로그인·SQLite 세션·로그아웃 확인. 외부 IdP/OAuth와 계정 관리 화면은 범위 밖 |
 | DB 원자성 | 확인 | CAS 0행 409, 초안 intent UNIQUE, 결과 FK, 정상 만료 rollback, SIGKILL 복구, projection 실패 시 draft/consume/result/audit rollback 확인 |
-| 경합·복구 | 확인 | 실제 두 연결 writer 경합과 503 예산, commit 뒤 응답 유실 replay, SQLite 백업 복구, 프로세스 강제 종료 후 rollback/commit 확인. 설계 14번의 수용 조건은 충족하며 물리 전원 손실 내구성은 주장하지 않는다 |
+| 경합·복구 | 확인 | 실제 두 연결 writer 경합과 503 예산, commit 뒤 응답 유실 replay, SQLite 백업 복구, 프로세스 강제 종료 후 rollback/commit 확인. 설계 14번의 수용 조건은 충족하며, 물리 전원 손실 내구성은 주장하지 않고 2026-11-06 범위 밖으로 확정했다 |
 | intent 수명 | 부분 확인 | 만료 410, 결과 보존 410, 정리, replay, 다른 입력 409 확인. 복제 탭·새로고침의 실제 브라우저 동작은 미실행 |
 | 공개 화면 | 확인 | escaped product name, label/오류 연결, 실제 브라우저 키보드 제출, 접근성 트리 확인. 실제 스크린리더 낭독은 미실행 |
 
 ## 구현 목표에서 제외한 것
 
-- **P0a/P0b B/L/S/D 비교**: 실제 대상 프로젝트가 있어야 하는 설계 실험이다. 대상이 없어 `P0_DECISION.ko.md`에 **판단 보류**로 기록했다. 설계 09번도 대상 없이 임의 프로젝트를 만들어 비교 결과로 포장하지 말라고 명시한다.
+- **P0a/P0b B/L/S/D 비교**: 실제 대상 프로젝트가 있어야 하는 설계 실험이다. 대상이 없어 `P0_DECISION.ko.md`에 **판단 보류**로 기록했고, 2026-11-06 목표 소유자가 **범위 밖**으로 확정했다. 설계 09번도 대상 없이 임의 프로젝트를 만들어 비교 결과로 포장하지 말라고 명시한다.
 - **외부 IdP/OAuth, 다중 테넌트 계정 관리**: 로컬 SQLite 자격 증명·세션 저장소로 참조 구현을 닫았다. 실제 외부 인증 공급자 연동은 P1 참조 범위 밖이다.
 - **다중 인스턴스 운영 배포**: 두 앱 인스턴스가 같은 SQLite 세션·CSRF를 공유하는 것은 테스트했지만, 로드밸런서·sticky session·운영 세션 만료 정책은 범위 밖이다.
 - **실제 스크린리더 낭독**: 접근성 트리와 키보드 제출까지만 확인했다.
-- **전원 장애**: SIGKILL 프로세스 강제 종료로 WAL rollback/commit을 확인했다. 전원 손실 내구성은 주장하지 않는다. WAL + `synchronous=FULL` 설정은 유지한다.
+- **전원 장애**: SIGKILL 프로세스 강제 종료로 WAL rollback/commit을 확인했다. 물리 전원 손실 내구성은 주장하지 않으며, 2026-11-06 목표 소유자가 **범위 밖**으로 확정했다. WAL + `synchronous=FULL` 설정은 유지한다.
 - **PostgreSQL 등 비동기 어댑터**: v0.5 참조 범위가 아니다.
 
 ## P0 판정과 범위 밖
 
-- **P0a/P0b**: 워크스페이스에서 `<form`을 쓰는 HTML/HTM/TSX/JSX/Vue/Svelte/EJS/HBS/PHP/CSHTML/Razor/Astro 파일을 검색했으나 0건이었다. 실제 대상 프로젝트가 없어 설계 09·14번의 기준에 따라 **판단 보류**로 기록했다. 통과가 아니며, 비교 결과를 합성하지 않는다. 상세: `P0_DECISION.ko.md`.
-- **물리 전원 손실**: 설계 14번의 P1 경합·복구 수용 조건은 “commit 뒤 응답 유실”이며, 이는 replay 테스트로 확인했다. SIGKILL/WAL `synchronous=FULL`/`integrity_check=ok`까지만 확인했고, 물리 전원 손실 내구성은 설계 수용 조건이 아니므로 주장하지 않는다.
+- **P0a/P0b**: 워크스페이스에서 `<form`을 쓰는 HTML/HTM/TSX/JSX/Vue/Svelte/EJS/HBS/PHP/CSHTML/Razor/Astro 파일을 검색했으나 0건이었다. 실제 대상 프로젝트가 없어 설계 09·14번의 기준에 따라 **판단 보류**로 기록했고, 2026-11-06 목표 소유자가 **범위 밖**으로 확정했다. 통과가 아니며, 비교 결과를 합성하지 않는다. 상세: `P0_DECISION.ko.md`.
+- **물리 전원 손실**: 설계 14번의 P1 경합·복구 수용 조건은 “commit 뒤 응답 유실”이며, 이는 replay 테스트로 확인했다. SIGKILL/WAL `synchronous=FULL`/`integrity_check=ok`까지만 확인했고, 물리 전원 손실 내구성은 설계 수용 조건이 아니므로 주장하지 않는다. 2026-11-06 목표 소유자가 **범위 밖**으로 확정했다.
 
 ## 구현 편차
 

@@ -7,9 +7,9 @@ HTML 폼과 서버 경계를 하나의 타입 안전 계약으로 연결하는 �
 - `docs/design/v0.5/`에 2026-11-05 설계 스냅샷을 보관한다. 이 디렉터리는 수정하지 않는다.
 - 계약 코어(엄격 JSON, canonical JSON, behavior digest, 계약 검증, form-check 투영)와 최소 form-only Doctor CLI를 구현했다.
 - 설계의 P1 참조 세로 조각도 구현했다: order coordinator, Bun SQLite 어댑터, Hono 어댑터, escaped HTML renderer, 실행 가능한 demo server.
-- P0a/P0b B/L/S/D 비교는 실제 대상 프로젝트가 없어 **판단 보류**다. P1 구현은 설계 검증이나 제품 적합성 증거가 아니라 참조 구현이다.
+- P0a/P0b B/L/S/D 비교는 실제 대상 프로젝트가 없어 **판단 보류**이며, 2026-11-06 목표 소유자가 **범위 밖**으로 확정했다. P1 구현은 설계 검증이나 제품 적합성 증거가 아니라 참조 구현이다.
 - 실제 브라우저에서 앱 스크립트 없이 키보드로 폼을 제출하는 흐름과 접근성 트리를 확인했다. 실제 스크린리더 낭독은 실행하지 않았다.
-- 로컬 마이크로벤치, commit 응답 유실 replay, SQLite `VACUUM INTO` 백업 복구, SIGKILL 후 rollback/commit을 확인했다. 전원 손실 내구성은 주장하지 않는다.
+- 로컬 마이크로벤치, commit 응답 유실 replay, SQLite `VACUUM INTO` 백업 복구, SIGKILL 후 rollback/commit을 확인했다. 물리 전원 손실 내구성은 주장하지 않으며, 2026-11-06 목표 소유자가 **범위 밖**으로 확정했다.
 - 외부 IdP/OAuth, 운영 다중 인스턴스 배포, rate limit/IP 제한은 P1 참조 범위 밖이다.
 - 이 저장소는 아직 SDK나 배포 패키지가 아니다.
 
@@ -27,7 +27,7 @@ HTML 폼과 서버 경계를 하나의 타입 안전 계약으로 연결하는 �
 - 첫 제품 후보는 읽기 전용 폼 연결 검사기(Doctor)다. 필요할 때만 typed wrapper를 선택한다.
 - v0.1은 native HTML, 평평한 string/integer, URL-encoded POST, JSON Schema 부분집합만 다룬다.
 - `.thtml`, 새 반응성, 서버 생성기, 일반 정보흐름 분석은 범위 밖이다.
-- P0a/P0b는 실제 대상이 없어 판단 보류다. 비교 결과를 합성하지 않는다.
+- P0a/P0b는 실제 대상이 없어 판단 보류다. 2026-11-06 목표 소유자가 범위 밖으로 확정했으며, 비교 결과를 합성하지 않는다.
 
 ## 구조
 
