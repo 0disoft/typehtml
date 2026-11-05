@@ -12,7 +12,8 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "doctor": "bun src/cli.ts doctor",
-    "example": "bun examples/order-app.ts"
+    "example": "bun examples/order-app.ts",
+    "bench": "bun scripts/order-benchmark.ts"
   },
   "dependencies": {
     "hono": "^4",

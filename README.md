@@ -8,7 +8,9 @@ HTML 폼과 서버 경계를 하나의 타입 안전 계약으로 연결하는 �
 - 계약 코어(엄격 JSON, canonical JSON, behavior digest, 계약 검증, form-check 투영)와 최소 form-only Doctor CLI를 구현했다.
 - 설계의 P1 참조 세로 조각도 구현했다: order coordinator, Bun SQLite 어댑터, Hono 어댑터, escaped HTML renderer, 실행 가능한 demo server.
 - P0a/P0b B/L/S/D 비교는 실제 대상 프로젝트가 없어 **NOT_RUN**이다. P1 구현은 설계 검증이나 제품 적합성 증거가 아니라 참조 구현이다.
-- 브라우저 no-JS 흐름, 실제 인증 공급자, 처리량·장애 복구는 아직 실행하지 않았다.
+- 실제 브라우저에서 앱 스크립트 없이 키보드로 폼을 제출하는 흐름과 접근성 트리를 확인했다. 실제 스크린리더 낭독은 실행하지 않았다.
+- 로컬 마이크로벤치, commit 응답 유실 replay, SQLite `VACUUM INTO` 백업 복구를 확인했다. 전원 장애·프로세스 강제 종료 내구성은 주장하지 않는다.
+- 실제 인증 공급자, 다중 인스턴스, rate limit/IP 제한은 P1 참조 범위 밖이다. P0a/P0b는 실제 대상 프로젝트가 없어 실행하지 않았다.
 - 이 저장소는 아직 SDK나 배포 패키지가 아니다.
 
 ## 먼저 읽을 것
@@ -37,6 +39,7 @@ HTML 폼과 서버 경계를 하나의 타입 안전 계약으로 연결하는 �
 - `src/render/` — escaped HTML 렌더러
 - `src/cli.ts` — `boundary doctor` CLI
 - `examples/order-app.ts` — 로컬 데모 server
+- `scripts/order-benchmark.ts` — 로컬 SQLite 흐름 마이크로벤치
 - `test/` — Bun 테스트
 - `docs/acceptance/` — 실행한 검사와 NOT_RUN 목록
 
@@ -48,6 +51,7 @@ Bun 1.4+ 기준.
 bun install
 bun test
 bun run typecheck
+bun run bench -- --iterations=200
 
 # 설계 패키지의 예제 config는 root "."를 현재 디렉터리 기준으로 해석한다.
 cd docs/design/v0.5
