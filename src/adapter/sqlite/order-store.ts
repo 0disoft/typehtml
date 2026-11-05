@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { OrderInput, Principal, Product, Draft } from '../../runtime/order.ts';
 import type { Grant, GrantScope, GrantIssuer } from '../../runtime/order-bindings.ts';
 import { assertSynchronous } from '../../runtime/sync.ts';
@@ -34,6 +35,35 @@ export type OrderStoreOptions = Readonly<{
   busyMaxWaitMs?: number;
   now?: () => number;
 }>;
+
+/** Per-call retry dependencies, separate from the store's business timestamp clock. */
+export type SqliteRetryRuntime = Readonly<{
+  now?: () => number;
+  sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+  signal?: AbortSignal;
+}>;
+
+async function waitForRetry(milliseconds: number, runtime: SqliteRetryRuntime): Promise<void> {
+  const { signal } = runtime;
+  signal?.throwIfAborted();
+  const sleep = runtime.sleep ?? ((ms, abortSignal) => delay(ms, undefined, { signal: abortSignal }));
+  if (signal === undefined) { await sleep(milliseconds); return; }
+  let abort!: () => void;
+  const aborted = new Promise<never>((_, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+  });
+  try {
+    // Subscribe to cancellation even if an injected I/O wait ignores its signal.
+    await Promise.race([Promise.resolve().then(() => {
+      signal.throwIfAborted();
+      return sleep(milliseconds, signal);
+    }), aborted]);
+    signal.throwIfAborted();
+  } finally {
+    signal.removeEventListener('abort', abort);
+  }
+}
 
 const DEFAULT_BUSY_RETRY_BUDGET_MS = 5_000;
 const DEFAULT_BUSY_MAX_WAIT_MS = 50;
@@ -578,28 +608,48 @@ export class SqliteOrderStore implements OrderStorage {
     }
   }
 
-  async immediate<T>(work: (tx: OrderWriteTx, issueGrant: GrantIssuer) => T): Promise<T> {
+  async immediate<T>(work: (tx: OrderWriteTx, issueGrant: GrantIssuer) => T, runtime: SqliteRetryRuntime = {}): Promise<T> {
     if (this.quarantined) throw new StoreCommitError('SQLITE_CONNECTION_QUARANTINED');
-    const deadline = performance.now() + this.busyRetryBudgetMs;
+    const { signal } = runtime;
+    signal?.throwIfAborted();
+    const now = runtime.now ?? (() => performance.now());
+    let lastTime = -Infinity;
+    const clock = () => {
+      const measured = now();
+      if (!Number.isFinite(measured) || measured < 0 || measured < lastTime) throw new Error('INVALID_SQLITE_RETRY_CLOCK');
+      return lastTime = measured;
+    };
+    const startedAt = clock();
+    const remaining = () => this.busyRetryBudgetMs - (clock() - startedAt);
+    let contended = false;
     while (true) {
+      if (this.quarantined) throw new StoreCommitError('SQLITE_CONNECTION_QUARANTINED');
+      // A zero budget still permits one uncontended attempt, never a retry.
+      if (contended && remaining() <= 0) throw new StoreBusyError(this.retryAfterSeconds);
+      signal?.throwIfAborted();
       try {
         this.db.exec('BEGIN IMMEDIATE');
         break;
       } catch (error) {
-        if (!isBusyError(error) || performance.now() >= deadline) {
-          if (isBusyError(error)) throw new StoreBusyError(this.retryAfterSeconds);
-          throw error;
-        }
-        await Bun.sleep(Math.min(this.busyMaxWaitMs, Math.max(1, deadline - performance.now())));
+        if (!isBusyError(error)) throw error;
+        contended = true;
       }
+      const left = remaining();
+      signal?.throwIfAborted();
+      if (left <= 0) throw new StoreBusyError(this.retryAfterSeconds);
+      await waitForRetry(Math.min(this.busyMaxWaitMs, left, 2_147_483_647), runtime);
     }
     const transaction = new SqliteWriteTx(this.db);
     const scoped = scopedTransaction(transaction, true);
     try {
+      // If acquisition crossed the deadline, roll back before exposing a write handle.
+      if (contended && remaining() <= 0) throw new StoreBusyError(this.retryAfterSeconds);
+      signal?.throwIfAborted();
       const value = assertSynchronous(work(scoped.tx, (scope) => {
         scoped.assertActive();
         return transaction.issueGrant(scope);
       }));
+      signal?.throwIfAborted();
       scoped.finish();
       try {
         this.db.exec('COMMIT');
