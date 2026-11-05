@@ -264,6 +264,9 @@ CREATE TABLE IF NOT EXISTS boundary_audit (
 
 CREATE INDEX IF NOT EXISTS form_intents_owner
   ON form_intents (tenant_id, subject_id, id);
+CREATE INDEX IF NOT EXISTS form_intents_open_owner_expiry
+  ON form_intents (tenant_id, subject_id, action_id, expires_at)
+  WHERE consumed_at IS NULL;
 CREATE INDEX IF NOT EXISTS action_results_expiry
   ON action_results (expires_at);
 `;

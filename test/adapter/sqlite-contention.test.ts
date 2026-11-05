@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -33,6 +33,70 @@ async function temporaryDatabase(): Promise<string> {
 }
 
 describe('SQLite writer contention', () => {
+  it('upgrades live-intent counting to an expiry range without changing scope or expiry semantics', async () => {
+    const filename = await temporaryDatabase();
+    let store: SqliteOrderStore | undefined;
+    let raw: Database | undefined;
+    const behaviorHash = 'b'.repeat(64);
+    try {
+      store = new SqliteOrderStore(filename);
+      store.seedMembership('tenant_1', 'subject_1');
+      store.seedMembership('tenant_1', 'subject_2');
+      store.seedMembership('tenant_2', 'subject_1');
+      store.close();
+      store = undefined;
+      raw = new Database(filename, { strict: true });
+      // Reproduce the existing schema before the selective index was introduced.
+      raw.exec('DROP INDEX IF EXISTS form_intents_open_owner_expiry');
+      const insert = raw.query(`INSERT INTO form_intents
+        (id, tenant_id, subject_id, action_id, product_id, resource_revision, behavior_hash, issued_at, expires_at, consumed_at)
+        VALUES (?, ?, ?, ?, 'p_100', 7, ?, 0, ?, ?)`);
+      raw.transaction(() => {
+        for (let index = 0; index < 2000; index++) {
+          insert.run(`expired_${index}`, 'tenant_1', 'subject_1', 'action', behaviorHash, 99, null);
+        }
+        for (const [id, tenant, subject, action, expiresAt, consumedAt] of [
+          ['at_expiry', 'tenant_1', 'subject_1', 'action', 100, null],
+          ['live_first', 'tenant_1', 'subject_1', 'action', 101, null],
+          ['live_second', 'tenant_1', 'subject_1', 'action', 120, null],
+          ['consumed', 'tenant_1', 'subject_1', 'action', 120, 1],
+          ['other_action', 'tenant_1', 'subject_1', 'other', 120, null],
+          ['other_subject', 'tenant_1', 'subject_2', 'action', 120, null],
+          ['other_tenant', 'tenant_2', 'subject_1', 'action', 120, null],
+        ] as const) insert.run(id, tenant, subject, action, behaviorHash, expiresAt, consumedAt);
+      }).immediate();
+      raw.close();
+      raw = undefined;
+
+      store = new SqliteOrderStore(filename);
+      const queries = spyOn(Database.prototype, 'query');
+      let countSql: string | undefined;
+      try {
+        expect(store.read((tx) => [
+          tx.countOpenIntents('tenant_1', 'subject_1', 'action', 99),
+          tx.countOpenIntents('tenant_1', 'subject_1', 'action', 100),
+          tx.countOpenIntents('tenant_1', 'subject_1', 'action', 101),
+          tx.countOpenIntents('tenant_1', 'subject_1', 'action', 120),
+          tx.countOpenIntents('tenant_1', 'subject_1', 'other', 100),
+          tx.countOpenIntents('tenant_1', 'subject_2', 'action', 100),
+          tx.countOpenIntents('tenant_2', 'subject_1', 'action', 100),
+        ])).toEqual([3, 2, 1, 0, 1, 1, 1]);
+        countSql = queries.mock.calls[0]?.[0];
+      } finally { queries.mockRestore(); }
+      expect(countSql).toBeDefined();
+      raw = new Database(filename, { strict: true });
+      const plan = raw.query(`EXPLAIN QUERY PLAN ${countSql}`).all('tenant_1', 'subject_1', 'action', 100) as { detail: string }[];
+      expect(plan.map((row) => row.detail).join('\n')).toContain('action_id=? AND expires_at>?');
+      await expect(store.immediate((tx) => tx.consumeIntent({
+        intentId: 'live_first', principal, behaviorHash, now: 100,
+      }))).resolves.toBe(true);
+      expect(store.read((tx) => tx.countOpenIntents('tenant_1', 'subject_1', 'action', 100))).toBe(1);
+    } finally {
+      raw?.close();
+      store?.close();
+    }
+  });
+
   it('bounds lock retries even when the business clock is frozen', async () => {
     const filename = await temporaryDatabase();
     const store = new SqliteOrderStore(filename, { now: () => 1_000_000, busyRetryBudgetMs: 20, busyMaxWaitMs: 5 });
