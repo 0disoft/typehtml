@@ -117,6 +117,73 @@ afterEach(async () => {
   }
 });
 
+describe('Doctor orchestration ordering', () => {
+  test('preserves binding counts, activation provenance and diagnostic precedence in a mixed document', async () => {
+    const source = '<form id="test-form" method="post" action="/submit">'
+      + '<input name="name"><input type="hidden" name="_bc_csrf"><input type="hidden" name="_bc_request">'
+      + '<button formmethod="get" formaction="https://external.invalid/wrong?x=1" formenctype="multipart/form-data">Unsupported</button>'
+      + '<button>Valid</button></form><form id="duplicate"></form><form id="duplicate"></form>';
+    const config = await fixture({ html: source, bindings: [
+      { formId: 'optional', actionId: 'test.submit', required: false },
+      { formId: 'test-form', actionId: 'test.submit', required: true },
+      { formId: 'duplicate', actionId: 'test.submit', required: true },
+      { formId: 'missing', actionId: 'test.submit', required: true },
+    ] });
+    const originalConfig = await readFile(config, 'utf8');
+    const report = await runDoctor(config);
+    expect(report.exitCode).toBe(1);
+    expect(report.scope).toEqual({ documents: 1, forms: 3, bindings: 4, paths: 2, applicationCompleteness: 'not-evaluated' });
+    expect(report.submissions.map((submission) => submission.effectiveTarget?.encoding))
+      .toEqual(['multipart/form-data', 'application/x-www-form-urlencoded']);
+    expect(report.submissions.map((submission) => submission.formId)).toEqual(['test-form', 'test-form']);
+    const activations = report.submissions.map((submission) => submission.activation);
+    expect(new Set(activations).size).toBe(2);
+    expect(report.findings.slice(0, 4).map((finding) => finding.subcode))
+      .toEqual(['external-origin', 'method-mismatch', 'path-mismatch', 'query-not-in-contract']);
+    expect(report.findings[4]?.ruleId).toBe('BC012');
+    expect(report.findings.slice(0, 5).every((finding) =>
+      finding.scope.target === 'form.html#test-form' && finding.scope.activation === activations[0])).toBe(true);
+    expect(report.findings.slice(5).map((finding) => [finding.subcode, finding.scope.target, finding.scope.activation]))
+      .toEqual([
+        ['form-duplicate', 'form.html#duplicate', 'binding'],
+        ['form-missing', 'form.html#missing', 'binding'],
+      ]);
+    expect(report.coverage.filter((row) => row.ruleGroup === 'target' && row.target === 'form.html#test-form')
+      .map((row) => [row.activation, row.actualStatus])).toEqual([[activations[0], 'unsupported'], [activations[1], 'checked']]);
+    expect(report.coverage.find((row) => row.target === 'form.html#optional' && row.ruleGroup === 'binding'))
+      .toMatchObject({ actualStatus: 'checked', requiredBoundary: false });
+    expect(report.coverage.some((row) => row.target === 'form.html#missing' && row.actualStatus === 'not-evaluated')).toBe(true);
+    expect(await readFile(config, 'utf8')).toBe(originalConfig);
+    expect(await readFile(join(dirs[dirs.length - 1]!, 'form.html'), 'utf8')).toBe(source);
+  });
+
+  test.each([
+    ['disabled', '<button disabled>Disabled default</button>', 0],
+    ['image', '<input type="image" src="unused.png">', 3],
+  ] as const)('keeps a first %s submitter blocking implicit activation even when a later button is enabled', async (_kind, first, explicitExit) => {
+    for (const policy of ['implicit-only', 'enumerate-native'] as const) {
+      const source = '<form id="test-form" method="post" action="/submit">'
+        + '<input name="name"><input type="hidden" name="_bc_csrf"><input type="hidden" name="_bc_request">'
+        + first + '<button formaction="/submit">Enabled later</button></form>';
+      const config = await fixture({ html: source, bindings: [
+        { formId: 'test-form', actionId: 'test.submit', required: true, submitterPolicy: policy },
+      ] });
+      const report = await runDoctor(config);
+      if (policy === 'implicit-only') {
+        expect(report.exitCode).toBe(3);
+        expect(report.scope.paths).toBe(0);
+        expect(report.submissions).toEqual([]);
+        expect(report.findings.map((finding) => finding.subcode)).toEqual(['no-native-activation']);
+      } else {
+        expect(report.exitCode).toBe(explicitExit);
+        expect(report.scope.paths).toBe(1);
+        expect(report.submissions[0]?.submitterLocation?.offset).toBe(source.indexOf('<button formaction="/submit">'));
+        expect(report.findings.some((finding) => finding.subcode === 'no-native-activation')).toBe(false);
+      }
+    }
+  });
+});
+
 describe('Doctor form-link analysis', () => {
   test('runs the selected snapshot without findings except a bounded constraint witness', async () => {
     const config = await fixture({

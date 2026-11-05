@@ -8,9 +8,9 @@ import {
   resolveEffectiveTarget,
   attribute,
 } from './html.ts';
-import type { ControlFact, FormFact, ParsedDocument } from './html.ts';
+import type { CollectionResult, ControlFact, FormFact, ParsedDocument, TargetResult } from './html.ts';
 import { DoctorConfigError, loadDoctorConfig, readConfiguredDocument, MAX_TOTAL_DOCUMENT_BYTES } from './config.ts';
-import type { LoadedDoctorConfig } from './types.ts';
+import type { DoctorBindingConfig, DoctorDocumentConfig, LoadedDoctorConfig } from './types.ts';
 import type {
   CoverageRow,
   Diagnostic,
@@ -22,6 +22,7 @@ import type {
 import { diagnosticError, diagnosticUnknown } from './types.ts';
 
 const MAX_REPORT_FINDINGS = 1000;
+const DOCTOR_EXIT = { success: 0, defect: 1, executionError: 2, incomplete: 3 } as const;
 
 function severityRank(value: Severity): number {
   return value === 'error' ? 3 : value === 'warning' ? 2 : 1;
@@ -126,7 +127,7 @@ function configErrorReport(configPath: string, message: string): DoctorReport {
     coverage: [],
     submissions: [],
     findingsTruncated: false,
-    exitCode: 2,
+    exitCode: DOCTOR_EXIT.executionError,
     error: message,
   };
 }
@@ -387,256 +388,246 @@ function checkConstraints(
     note: compared ? 'bounded integer witnesses checked against native min/max/step or the known ASCII integer pattern; this is not equivalence proof' : 'no supported native integer constraint comparison; other constraint semantics remain unknown',
   });
 }
+interface AnalysisState {
+  readonly collector: Collector;
+  readonly submissions: SubmissionFact[];
+  readonly executionErrors: string[];
+  totalBytes: number;
+  documents: number;
+  forms: number;
+  bindings: number;
+  paths: number;
+}
+
+type DocumentSnapshot = Readonly<{
+  document: DoctorDocumentConfig;
+  parsed: ParsedDocument;
+  artifactHash: string;
+}>;
+
+type BoundForm = Readonly<{
+  snapshot: DocumentSnapshot;
+  binding: DoctorBindingConfig;
+  form: FormFact;
+  check: FormCheck;
+}>;
+
 async function analyzeLoaded(loaded: LoadedDoctorConfig): Promise<DoctorReport> {
-  const collector = makeCollector(loaded);
-  const submissions: SubmissionFact[] = [];
-  const executionErrors: string[] = [];
-  let documents = 0;
-  let forms = 0;
-  let totalBytes = 0;
-  let bindings = 0;
-  let paths = 0;
+  const state: AnalysisState = {
+    collector: makeCollector(loaded), submissions: [], executionErrors: [],
+    totalBytes: 0, documents: 0, forms: 0, bindings: 0, paths: 0,
+  };
   for (const document of loaded.config.documents) {
-    let html: string;
-    try {
-      html = await readConfiguredDocument(loaded, document);
-    } catch (error) {
-      executionErrors.push(`${document.path}: ${error instanceof Error ? error.message : 'cannot read selected document'}`);
-      continue;
-    }
-    totalBytes += Buffer.byteLength(html, 'utf8');
-    if (totalBytes > MAX_TOTAL_DOCUMENT_BYTES) {
-      executionErrors.push(`selected documents exceed ${MAX_TOTAL_DOCUMENT_BYTES} bytes in total`);
-      break;
-    }
-    let parsed: ParsedDocument;
-    try {
-      parsed = parseHtmlDocument(html, document.documentUrl, document.path);
-    } catch (error) {
-      executionErrors.push(`${document.path}: ${error instanceof Error ? error.message : 'cannot parse selected document'}`);
-      continue;
-    }
-    const artifactHash = sourceSha256(Buffer.from(html, 'utf8'));
-    let currentHash: string;
-    try { currentHash = sourceSha256(Buffer.from(await readConfiguredDocument(loaded, document), 'utf8')); }
-    catch (error) { executionErrors.push(`${document.path}: ${error instanceof Error ? error.message : 'cannot reread selected document'}`); continue; }
-    if (artifactHash !== currentHash) {
-      for (const binding of document.bindings) {
-        collector.scope(binding.required, 'binding', targetPath(document.path, binding));
-        collector.add(diagnosticUnknown('BC193', 'stale-source', `${document.path}/${binding.formId}/changed`, 'source-changed', 'document changed while it was being parsed; its facts were discarded', null));
-        collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'binding', actualStatus: 'unknown', evidenceRef: null, note: 'source changed during analysis' });
-      }
-      continue;
-    }
-    documents += 1;
-    forms += parsed.forms.length;
+    const snapshot = await readStableDocument(loaded, document, state);
+    if (snapshot === 'budget-exceeded') break;
+    if (snapshot === null) continue;
+    state.documents += 1;
+    state.forms += snapshot.parsed.forms.length;
     for (const binding of document.bindings) {
-      collector.scope(binding.required, 'binding', targetPath(document.path, binding));
-      bindings += 1;
-      const formCandidates = parsed.formIds.get(binding.formId) ?? [];
-      if (formCandidates.length === 0) {
-        if (!binding.required) {
-          collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'binding', actualStatus: 'checked', evidenceRef: null, note: 'optional declared form is absent from this selected snapshot' });
-          continue;
-        }
-        collector.add(
-          diagnosticError(
-            'BC014',
-            'binding-missing',
-            `${binding.actionId}/binding/form-missing`,
-            'form-missing',
-            `declared form id ${noteForName(binding.formId)} was not found in the selected snapshot`,
-            null,
-          ),
-        );
-        collector.cover({
-          target: targetPath(document.path, binding),
-          ruleGroup: 'binding',
-          actualStatus: 'checked',
-          evidenceRef: null,
-          note: 'explicit binding cannot be resolved to a form',
-        });
-        continue;
-      }
-      if (formCandidates.length > 1 || parsed.duplicateIds.has(binding.formId)) {
-        collector.add(
-          diagnosticError(
-            'BC014',
-            'binding-duplicate',
-            `${binding.actionId}/binding/form-duplicate`,
-            'form-duplicate',
-            `declared form id ${noteForName(binding.formId)} is duplicated in the selected snapshot`,
-            formCandidates[1]?.location ?? formCandidates[0]?.location ?? null,
-          ),
-        );
-        collector.cover({
-          target: targetPath(document.path, binding),
-          ruleGroup: 'binding',
-          actualStatus: 'checked',
-          evidenceRef: formCandidates[0]?.location ?? null,
-          note: 'explicit binding is ambiguous because the form id is duplicated',
-        });
-        continue;
-      }
-      const form = formCandidates[0]!;
-      const check = loaded.formChecks.get(binding.actionId);
-      if (!check) {
-        collector.add(
-          diagnosticError(
-            'BC014',
-            'binding-missing',
-            `${binding.actionId}/binding/action-missing`,
-            'action-missing',
-            `declared action id ${noteForName(binding.actionId)} has no form projection input`,
-            form.location,
-          ),
-        );
-        collector.cover({
-          target: targetPath(document.path, binding),
-          ruleGroup: 'binding',
-          actualStatus: 'checked',
-          evidenceRef: form.location,
-          note: 'explicit binding references an action without a selected projection',
-        });
-        continue;
-      }
-      const sourceIssue = loaded.sourceIssues.get(binding.actionId);
-      if (sourceIssue) {
-        collector.add(diagnosticUnknown('BC193', 'stale-projection', `${document.path}/${binding.formId}/projection`, 'stale-projection', `selected form projection cannot be verified against its authoritative source: ${sourceIssue}`, form.location));
-        collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'binding', actualStatus: 'unknown', evidenceRef: form.location, note: 'source bytes, behavior digest, and exact projection must agree before connection checks' });
-        continue;
-      }
-      collector.cover({
-        target: targetPath(document.path, binding),
-        ruleGroup: 'binding',
-        actualStatus: 'checked',
-        evidenceRef: form.location,
-        note: 'explicit form id and action id resolved to one form and one selected projection',
-      });
-      const nativeSubmitters = findSubmitters(form).filter(
-        (control) => !(control.tagName === 'input' && control.type === 'image'),
-      );
-      const defaultSubmitter = form.controls.find((control) => (control.tagName === 'button' && control.type === 'submit') || (control.tagName === 'input' && ['submit', 'image'].includes(control.type)));
-      const implicitSubmitters: (ControlFact | null)[] = defaultSubmitter
-        ? defaultSubmitter.disabled || defaultSubmitter.type === 'image' ? [] : [defaultSubmitter]
-        : canImplicitlySubmit(form) ? [null] : [];
-      const submitters: (ControlFact | null)[] = binding.submitterPolicy === 'implicit-only'
-        ? implicitSubmitters
-        : nativeSubmitters.length > 0 ? nativeSubmitters : implicitSubmitters;
-      if (submitters.length === 0) {
-        collector.add(
-          diagnosticUnknown(
-            'BC012',
-            'unsupported-activation',
-            `${binding.actionId}/native/activation-missing`,
-            'no-native-activation',
-            'form has no supported native submitter and no single-blocking-field implicit submission',
-            form.location,
-          ),
-        );
-        collector.cover({
-          target: targetPath(document.path, binding),
-          ruleGroup: 'target',
-          actualStatus: 'unsupported',
-          evidenceRef: form.location,
-          note: 'no native activation could be enumerated',
-        });
-        continue;
-      }
-      for (const submitter of submitters) {
-        const activation = submitter ? `submitter@${submitter.location.offset}` : 'implicit-without-button';
-        collector.scope(binding.required, activation);
-        paths += 1;
-        const resolved = resolveEffectiveTarget(form, submitter);
-        const collection = collectFormEntries(form, submitter);
-        submissions.push({
-          artifact: { path: document.path, sha256: artifactHash, sourceKind: document.sourceKind },
-          intendedAction: check.action, projectionSource: check.source, formId: binding.formId, formLocation: form.location,
-          context: { documentUrl: document.documentUrl, baseUrl: parsed.baseUrl, executionAssumption: document.executionAssumption, hasScript: parsed.hasScript },
-          activation, submitterLocation: submitter?.location ?? null,
-          rawAction: attribute(form.element, 'action'), rawSubmitterAction: submitter ? attribute(submitter.element, 'formaction') : null,
-          effectiveTarget: resolved.target ? { url: resolved.target.url.href, method: resolved.target.method, encoding: resolved.target.encoding, skipValidation: resolved.target.skipValidation } : null,
-          fields: [...collection.possibleCounts].map(([name, possibleCount]) => ({ name, possibleCount, locations: collection.entries.filter((entry) => entry.name === name).map((entry) => entry.control.location) })),
-        });
-        if (resolved.target === null) {
-          const code = resolved.problem?.code ?? 'UNSUPPORTED_METHOD';
-          collector.add(
-            diagnosticUnknown(
-              'BC012',
-              'unsupported-transport',
-              `${binding.actionId}/native/transport-${code}`,
-              `unsupported-${code.toLowerCase()}`,
-              resolved.problem?.message ?? 'native target cannot be analyzed by the form-only profile',
-              submitter?.location ?? form.location,
-            ),
-          );
-          collector.cover({
-            target: targetPath(document.path, binding),
-            ruleGroup: 'target',
-            actualStatus: 'unsupported',
-            evidenceRef: submitter?.location ?? form.location,
-            note: `effective target could not be evaluated: ${code}`,
-          });
-          continue;
-        }
-        if (resolved.target.url.origin !== new URL(document.documentUrl).origin) {
-          collector.add(
-            diagnosticError(
-              'BC011',
-              'method-path-mismatch',
-              `${binding.actionId}/native/target-external`,
-              'external-origin',
-              'effective action resolves outside the document origin',
-              submitter?.location ?? form.location,
-            ),
-          );
-          collector.cover({
-            target: targetPath(document.path, binding),
-            ruleGroup: 'target',
-            actualStatus: 'checked',
-            evidenceRef: submitter?.location ?? form.location,
-            note: 'external origin recorded as a target defect',
-          });
-        }
-        compareTarget(collector, check, { url: resolved.target.url, method: resolved.target.method }, document.path, binding.formId, submitter?.location ?? form.location);
-        if (resolved.problem?.code === 'UNSUPPORTED_ENCODING' || resolved.problem?.code === 'UNSUPPORTED_METHOD') {
-          collector.add(diagnosticUnknown('BC012', 'unsupported-transport', `${binding.actionId}/native/${resolved.problem.code}`, `unsupported-${resolved.problem.code.toLowerCase()}`, resolved.problem.message, submitter?.location ?? form.location));
-          collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'target', actualStatus: 'unsupported', evidenceRef: submitter?.location ?? form.location, note: resolved.problem.message });
-          continue;
-        }
-        const supply = checkSupply(
-          collector,
-          check,
-          form,
-          submitter,
-          document.path,
-          binding,
-          submitter?.location ?? form.location,
-        );
-        checkConstraints(collector, check, supply.entries, document.path, binding, resolved.target.skipValidation);
-      }
-      collector.scope(binding.required, 'binding');
-      collector.cover({
-        target: targetPath(document.path, binding),
-        ruleGroup: 'runtime-security',
-        actualStatus: 'not-evaluated',
-        evidenceRef: form.location,
-        note: 'selected form projection does not establish CSRF, origin, session, authorization, or transaction behavior',
-      });
-      collector.cover({
-        target: targetPath(document.path, binding),
-        ruleGroup: 'bypass',
-        actualStatus: 'not-evaluated',
-        evidenceRef: null,
-        note: 'application route graph and bypass scanning were not provided to the form-only Doctor',
-      });
+      state.collector.scope(binding.required, 'binding', targetPath(document.path, binding));
+      state.bindings += 1;
+      analyzeBinding(loaded, snapshot, binding, state);
     }
   }
+  return completeReport(loaded, state);
+}
+
+async function readStableDocument(
+  loaded: LoadedDoctorConfig, document: DoctorDocumentConfig, state: AnalysisState,
+): Promise<DocumentSnapshot | 'budget-exceeded' | null> {
+  let html: string;
+  try { html = await readConfiguredDocument(loaded, document); }
+  catch (error) {
+    state.executionErrors.push(`${document.path}: ${error instanceof Error ? error.message : 'cannot read selected document'}`);
+    return null;
+  }
+  state.totalBytes += Buffer.byteLength(html, 'utf8');
+  if (state.totalBytes > MAX_TOTAL_DOCUMENT_BYTES) {
+    state.executionErrors.push(`selected documents exceed ${MAX_TOTAL_DOCUMENT_BYTES} bytes in total`);
+    return 'budget-exceeded';
+  }
+  let parsed: ParsedDocument;
+  try { parsed = parseHtmlDocument(html, document.documentUrl, document.path); }
+  catch (error) {
+    state.executionErrors.push(`${document.path}: ${error instanceof Error ? error.message : 'cannot parse selected document'}`);
+    return null;
+  }
+  const artifactHash = sourceSha256(Buffer.from(html, 'utf8'));
+  let currentHash: string;
+  try { currentHash = sourceSha256(Buffer.from(await readConfiguredDocument(loaded, document), 'utf8')); }
+  catch (error) {
+    state.executionErrors.push(`${document.path}: ${error instanceof Error ? error.message : 'cannot reread selected document'}`);
+    return null;
+  }
+  if (artifactHash !== currentHash) {
+    recordChangedDocument(state.collector, document);
+    return null;
+  }
+  return { document, parsed, artifactHash };
+}
+
+function recordChangedDocument(collector: Collector, document: DoctorDocumentConfig): void {
+  for (const binding of document.bindings) {
+    collector.scope(binding.required, 'binding', targetPath(document.path, binding));
+    collector.add(diagnosticUnknown('BC193', 'stale-source', `${document.path}/${binding.formId}/changed`, 'source-changed', 'document changed while it was being parsed; its facts were discarded', null));
+    collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'binding', actualStatus: 'unknown', evidenceRef: null, note: 'source changed during analysis' });
+  }
+}
+
+function resolveBinding(
+  loaded: LoadedDoctorConfig, snapshot: DocumentSnapshot, binding: DoctorBindingConfig, collector: Collector,
+): BoundForm | null {
+  const { document, parsed } = snapshot;
+  const candidates = parsed.formIds.get(binding.formId) ?? [];
+  if (candidates.length === 0) {
+    recordAbsentForm(collector, document.path, binding);
+    return null;
+  }
+  if (candidates.length > 1 || parsed.duplicateIds.has(binding.formId)) {
+    collector.add(diagnosticError('BC014', 'binding-duplicate', `${binding.actionId}/binding/form-duplicate`, 'form-duplicate',
+      `declared form id ${noteForName(binding.formId)} is duplicated in the selected snapshot`, candidates[1]?.location ?? candidates[0]?.location ?? null));
+    collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'binding', actualStatus: 'checked',
+      evidenceRef: candidates[0]?.location ?? null, note: 'explicit binding is ambiguous because the form id is duplicated' });
+    return null;
+  }
+  const form = candidates[0]!;
+  const check = loaded.formChecks.get(binding.actionId);
+  if (!check) {
+    collector.add(diagnosticError('BC014', 'binding-missing', `${binding.actionId}/binding/action-missing`, 'action-missing',
+      `declared action id ${noteForName(binding.actionId)} has no form projection input`, form.location));
+    collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'binding', actualStatus: 'checked',
+      evidenceRef: form.location, note: 'explicit binding references an action without a selected projection' });
+    return null;
+  }
+  const sourceIssue = loaded.sourceIssues.get(binding.actionId);
+  if (sourceIssue) {
+    collector.add(diagnosticUnknown('BC193', 'stale-projection', `${document.path}/${binding.formId}/projection`, 'stale-projection', `selected form projection cannot be verified against its authoritative source: ${sourceIssue}`, form.location));
+    collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'binding', actualStatus: 'unknown', evidenceRef: form.location, note: 'source bytes, behavior digest, and exact projection must agree before connection checks' });
+    return null;
+  }
+  collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'binding', actualStatus: 'checked',
+    evidenceRef: form.location, note: 'explicit form id and action id resolved to one form and one selected projection' });
+  return { snapshot, binding, form, check };
+}
+
+function recordAbsentForm(collector: Collector, documentPath: string, binding: DoctorBindingConfig): void {
+  if (!binding.required) {
+    collector.cover({ target: targetPath(documentPath, binding), ruleGroup: 'binding', actualStatus: 'checked', evidenceRef: null,
+      note: 'optional declared form is absent from this selected snapshot' });
+    return;
+  }
+  collector.add(diagnosticError('BC014', 'binding-missing', `${binding.actionId}/binding/form-missing`, 'form-missing',
+    `declared form id ${noteForName(binding.formId)} was not found in the selected snapshot`, null));
+  collector.cover({ target: targetPath(documentPath, binding), ruleGroup: 'binding', actualStatus: 'checked', evidenceRef: null,
+    note: 'explicit binding cannot be resolved to a form' });
+}
+
+function selectNativeActivations(form: FormFact, policy: DoctorBindingConfig['submitterPolicy']): (ControlFact | null)[] {
+  const native = findSubmitters(form).filter((control) => !(control.tagName === 'input' && control.type === 'image'));
+  const implicit = implicitActivations(form);
+  if (policy === 'implicit-only') return implicit;
+  return native.length > 0 ? native : implicit;
+}
+
+/** The first default submitter remains authoritative even when disabled or an image. */
+function implicitActivations(form: FormFact): (ControlFact | null)[] {
+  const defaultSubmitter = form.controls.find((control) =>
+    (control.tagName === 'button' && control.type === 'submit') || (control.tagName === 'input' && ['submit', 'image'].includes(control.type)));
+  if (defaultSubmitter) {
+    if (defaultSubmitter.disabled || defaultSubmitter.type === 'image') return [];
+    return [defaultSubmitter];
+  }
+  if (canImplicitlySubmit(form)) return [null];
+  return [];
+}
+
+function analyzeBinding(loaded: LoadedDoctorConfig, snapshot: DocumentSnapshot, binding: DoctorBindingConfig, state: AnalysisState): void {
+  const { collector } = state;
+  const bound = resolveBinding(loaded, snapshot, binding, collector);
+  if (bound === null) return;
+  const { form } = bound;
+  const { document } = snapshot;
+  const submitters = selectNativeActivations(form, binding.submitterPolicy);
+  if (submitters.length === 0) {
+    collector.add(diagnosticUnknown('BC012', 'unsupported-activation', `${binding.actionId}/native/activation-missing`, 'no-native-activation',
+      'form has no supported native submitter and no single-blocking-field implicit submission', form.location));
+    collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'target', actualStatus: 'unsupported',
+      evidenceRef: form.location, note: 'no native activation could be enumerated' });
+    return;
+  }
+  for (const submitter of submitters) {
+    const activation = submitter ? `submitter@${submitter.location.offset}` : 'implicit-without-button';
+    collector.scope(binding.required, activation);
+    state.paths += 1;
+    analyzeActivation(state, bound, submitter, activation);
+  }
+  collector.scope(binding.required, 'binding');
+  collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'runtime-security', actualStatus: 'not-evaluated',
+    evidenceRef: form.location, note: 'selected form projection does not establish CSRF, origin, session, authorization, or transaction behavior' });
+  collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'bypass', actualStatus: 'not-evaluated', evidenceRef: null,
+    note: 'application route graph and bypass scanning were not provided to the form-only Doctor' });
+}
+
+function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: ControlFact | null, activation: string): void {
+  const { collector, submissions } = state;
+  const { snapshot: { document }, binding, form, check } = bound;
+  const location = submitter?.location ?? form.location;
+  const resolved = resolveEffectiveTarget(form, submitter);
+  const collection = collectFormEntries(form, submitter);
+  submissions.push(submissionFact(bound, submitter, activation, resolved, collection));
+  if (resolved.target === null) {
+    recordUnsupportedTarget(collector, bound, location, resolved);
+    return;
+  }
+  if (resolved.target.url.origin !== new URL(document.documentUrl).origin) {
+    collector.add(diagnosticError('BC011', 'method-path-mismatch', `${binding.actionId}/native/target-external`, 'external-origin',
+      'effective action resolves outside the document origin', location));
+    collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'target', actualStatus: 'checked', evidenceRef: location,
+      note: 'external origin recorded as a target defect' });
+  }
+  compareTarget(collector, check, { url: resolved.target.url, method: resolved.target.method }, document.path, binding.formId, location);
+  if (resolved.problem?.code === 'UNSUPPORTED_ENCODING' || resolved.problem?.code === 'UNSUPPORTED_METHOD') {
+    collector.add(diagnosticUnknown('BC012', 'unsupported-transport', `${binding.actionId}/native/${resolved.problem.code}`, `unsupported-${resolved.problem.code.toLowerCase()}`, resolved.problem.message, location));
+    collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'target', actualStatus: 'unsupported', evidenceRef: location, note: resolved.problem.message });
+    return;
+  }
+  const supply = checkSupply(collector, check, form, submitter, document.path, binding, location);
+  checkConstraints(collector, check, supply.entries, document.path, binding, resolved.target.skipValidation);
+}
+
+/** New provenance records keep parsed controls and configured bindings unchanged. */
+function submissionFact(
+  bound: BoundForm, submitter: ControlFact | null, activation: string, resolved: TargetResult, collection: CollectionResult,
+): SubmissionFact {
+  const { snapshot: { document, parsed, artifactHash }, binding, form, check } = bound;
+  return {
+    artifact: { path: document.path, sha256: artifactHash, sourceKind: document.sourceKind },
+    intendedAction: check.action, projectionSource: check.source, formId: binding.formId, formLocation: form.location,
+    context: { documentUrl: document.documentUrl, baseUrl: parsed.baseUrl, executionAssumption: document.executionAssumption, hasScript: parsed.hasScript },
+    activation, submitterLocation: submitter?.location ?? null,
+    rawAction: attribute(form.element, 'action'), rawSubmitterAction: submitter ? attribute(submitter.element, 'formaction') : null,
+    effectiveTarget: resolved.target ? { url: resolved.target.url.href, method: resolved.target.method, encoding: resolved.target.encoding, skipValidation: resolved.target.skipValidation } : null,
+    fields: [...collection.possibleCounts].map(([name, possibleCount]) => ({ name, possibleCount, locations: collection.entries.filter((entry) => entry.name === name).map((entry) => entry.control.location) })),
+  };
+}
+
+function recordUnsupportedTarget(collector: Collector, bound: BoundForm, location: SourceLocation, resolved: TargetResult): void {
+  const { snapshot: { document }, binding } = bound;
+  const code = resolved.problem?.code ?? 'UNSUPPORTED_METHOD';
+  collector.add(diagnosticUnknown('BC012', 'unsupported-transport', `${binding.actionId}/native/transport-${code}`, `unsupported-${code.toLowerCase()}`,
+    resolved.problem?.message ?? 'native target cannot be analyzed by the form-only profile', location));
+  collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'target', actualStatus: 'unsupported', evidenceRef: location,
+    note: `effective target could not be evaluated: ${code}` });
+}
+
+function completeReport(loaded: LoadedDoctorConfig, state: AnalysisState): DoctorReport {
+  const { collector, submissions, executionErrors, documents, forms, bindings, paths } = state;
   for (const document of loaded.config.documents) for (const binding of document.bindings) {
     collector.scope(binding.required, 'binding', targetPath(document.path, binding));
     collector.completeBoundary();
   }
-  const exitCode: DoctorReport['exitCode'] = executionErrors.length > 0 ? 2 : collector.hasError() ? 1 : collector.isIncomplete() ? 3 : 0;
+  const exitCode = executionErrors.length > 0 ? DOCTOR_EXIT.executionError
+    : collector.hasError() ? DOCTOR_EXIT.defect : collector.isIncomplete() ? DOCTOR_EXIT.incomplete : DOCTOR_EXIT.success;
   return {
     format: 'boundary-doctor-report/0.1-draft',
     status: executionErrors.length > 0 ? 'configuration-error' : 'executed',
