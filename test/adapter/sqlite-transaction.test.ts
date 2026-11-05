@@ -19,6 +19,45 @@ const scope: GrantScope = {
 };
 
 describe('SQLite transaction boundaries', () => {
+  it.each(['configure', 'migrate', 'schema'] as const)('closes orphaned startup connections after a %s failure', async (failure) => {
+    const directory = await mkdtemp(join(tmpdir(), 'typehtml-startup-'));
+    const filename = join(directory, 'orders.sqlite');
+    const owner = new Database(filename, { strict: true });
+    const opened: Database[] = [];
+    let store: SqliteOrderStore | undefined;
+    const originalExec = Database.prototype.exec;
+    try {
+      if (failure === 'configure') owner.exec('BEGIN EXCLUSIVE');
+      if (failure === 'migrate') {
+        owner.exec('PRAGMA journal_mode = WAL');
+        owner.exec('BEGIN IMMEDIATE');
+      }
+      if (failure === 'schema') owner.exec('CREATE TABLE form_intents (id TEXT PRIMARY KEY)');
+      const observed = spyOn(Database.prototype, 'exec').mockImplementation(function (this: Database, sql: string) {
+        if (this !== owner && !opened.includes(this)) opened.push(this);
+        return originalExec.call(this, sql);
+      });
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          expect(() => new SqliteOrderStore(filename)).toThrow(failure === 'schema' ? 'no such column' : 'database is locked');
+          expect(opened).toHaveLength(attempt + 1);
+          expect(() => opened[attempt]!.query('SELECT 1').get()).toThrow('closed');
+        }
+      } finally { observed.mockRestore(); }
+      if (owner.inTransaction) owner.exec('ROLLBACK');
+      if (failure === 'schema') owner.exec('DROP TABLE form_intents');
+      store = new SqliteOrderStore(filename);
+      expect(store.read(() => 1)).toBe(1);
+      await expect(store.immediate(() => 2)).resolves.toBe(2);
+    } finally {
+      store?.close();
+      for (const connection of opened) connection.close(true);
+      if (owner.inTransaction) owner.exec('ROLLBACK');
+      owner.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('rejects asynchronous callbacks and invalidates escaped read and write handles', async () => {
     const store = new SqliteOrderStore(':memory:');
     let read!: OrderReadTx;

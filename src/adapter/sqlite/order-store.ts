@@ -530,18 +530,24 @@ export class SqliteOrderStore implements OrderStorage {
 
   constructor(filename: string, options: OrderStoreOptions = {}) {
     this.db = new Database(filename, { create: true, strict: true, readwrite: true });
-    this.busyRetryBudgetMs = options.busyRetryBudgetMs ?? DEFAULT_BUSY_RETRY_BUDGET_MS;
-    this.retryAfterSeconds = options.retryAfterSeconds ?? DEFAULT_RETRY_AFTER_SECONDS;
-    this.busyMaxWaitMs = options.busyMaxWaitMs ?? DEFAULT_BUSY_MAX_WAIT_MS;
-    this.now = options.now ?? Date.now;
-    if (!Number.isFinite(this.busyRetryBudgetMs) || this.busyRetryBudgetMs < 0 ||
-        !Number.isFinite(this.busyMaxWaitMs) || this.busyMaxWaitMs <= 0 ||
-        !Number.isSafeInteger(this.retryAfterSeconds) || this.retryAfterSeconds < 1) {
-      this.db.close();
-      throw new Error('INVALID_SQLITE_RETRY_OPTIONS');
+    let initialized = false;
+    try {
+      this.busyRetryBudgetMs = options.busyRetryBudgetMs ?? DEFAULT_BUSY_RETRY_BUDGET_MS;
+      this.retryAfterSeconds = options.retryAfterSeconds ?? DEFAULT_RETRY_AFTER_SECONDS;
+      this.busyMaxWaitMs = options.busyMaxWaitMs ?? DEFAULT_BUSY_MAX_WAIT_MS;
+      this.now = options.now ?? Date.now;
+      if (!Number.isFinite(this.busyRetryBudgetMs) || this.busyRetryBudgetMs < 0 ||
+          !Number.isFinite(this.busyMaxWaitMs) || this.busyMaxWaitMs <= 0 ||
+          !Number.isSafeInteger(this.retryAfterSeconds) || this.retryAfterSeconds < 1) {
+        throw new Error('INVALID_SQLITE_RETRY_OPTIONS');
+      }
+      this.configure();
+      this.migrate();
+      initialized = true;
+    } finally {
+      // A failed constructor cannot transfer connection ownership to its caller.
+      if (!initialized) this.db.close(true);
     }
-    this.configure();
-    this.migrate();
   }
 
   private configure(): void {
