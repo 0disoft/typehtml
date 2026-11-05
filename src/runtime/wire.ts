@@ -43,6 +43,23 @@ export interface FormReadOptions extends FormReadLimits {
   readonly expectRequestKey: boolean;
 }
 
+export interface FormBodyReader {
+  read(): Promise<{ readonly done: boolean; readonly value?: Uint8Array }>;
+  cancel(): Promise<void>;
+  releaseLock(): void;
+}
+
+/** Optional transport dependencies; existing callers keep the platform defaults. */
+export interface FormReadRuntime {
+  /** Monotonic milliseconds, like performance.now(). */
+  readonly now?: () => number;
+  /** Schedule asynchronously and return a function that cancels that callback. */
+  readonly scheduleTimeout?: (callback: () => void, delayMs: number) => () => void;
+  readonly openReader?: (request: Request) => FormBodyReader | null;
+  /** Additional cancellation; the request's own signal is always respected. */
+  readonly signal?: AbortSignal;
+}
+
 export function formReadOptions(
   http: HttpContract,
   protocol: ProtocolContract,
@@ -141,25 +158,77 @@ export function assertFormTransport(request: Request, maxBytes: number): void {
   }
 }
 
-async function readBoundedBody(request: Request, options: FormReadLimits): Promise<Uint8Array> {
-  if (request.signal.aborted) throw new WireError(400, 'BODY_READ_ABORTED');
-  if (request.body === null) return new Uint8Array(0);
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
+async function readBoundedBody(request: Request, options: FormReadLimits, runtime: FormReadRuntime): Promise<Uint8Array> {
   const timeoutMs = options.readTimeoutMs ?? 30_000;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    reader.releaseLock();
     throw new Error('INVALID_BODY_READ_TIMEOUT');
   }
-  let rejectStop!: (error: WireError) => void;
+  const signals = runtime.signal === undefined || runtime.signal === request.signal
+    ? [request.signal] : [request.signal, runtime.signal];
+  const assertNotAborted = () => {
+    if (signals.some((signal) => signal.aborted)) throw new WireError(400, 'BODY_READ_ABORTED');
+  };
+  assertNotAborted();
+  const now = runtime.now ?? (() => performance.now());
+  const scheduleTimeout = runtime.scheduleTimeout ?? ((callback, delayMs) => {
+    const timer = setTimeout(callback, delayMs);
+    return () => clearTimeout(timer);
+  });
+  let lastTime = -Infinity;
+  const clock = () => {
+    const measured = now();
+    if (!Number.isFinite(measured) || measured < 0 || measured < lastTime) throw new Error('INVALID_BODY_READ_CLOCK');
+    return lastTime = measured;
+  };
+  const startedAt = clock();
+  const remaining = () => timeoutMs - (clock() - startedAt);
+  let reader: FormBodyReader | null;
+  try { reader = runtime.openReader === undefined ? request.body?.getReader() ?? null : runtime.openReader(request); }
+  catch { throw new WireError(400, 'BODY_READ_FAILED'); }
+  if (reader === null) {
+    assertNotAborted();
+    if (remaining() <= 0) throw new WireError(408, 'BODY_READ_TIMEOUT');
+    return new Uint8Array(0);
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let rejectStop!: (error: unknown) => void;
   const stopped = new Promise<never>((_, reject) => { rejectStop = reject; });
-  const abort = () => rejectStop(new WireError(400, 'BODY_READ_ABORTED'));
-  request.signal.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => rejectStop(new WireError(408, 'BODY_READ_TIMEOUT')), timeoutMs);
+  // Setup can fail before the first race has subscribed to this promise.
+  void stopped.catch(() => undefined);
+  let stoppedError: { error: unknown } | undefined;
+  const stop = (error: unknown) => {
+    if (stoppedError === undefined) { stoppedError = { error }; rejectStop(error); }
+  };
+  const abort = () => stop(new WireError(400, 'BODY_READ_ABORTED'));
+  const assertActive = () => {
+    assertNotAborted();
+    if (stoppedError !== undefined) throw stoppedError.error;
+    if (remaining() <= 0) throw new WireError(408, 'BODY_READ_TIMEOUT');
+  };
+  let cancelTimer: (() => void) | undefined;
+  const armTimeout = () => {
+    const delay = remaining();
+    if (delay <= 0) { stop(new WireError(408, 'BODY_READ_TIMEOUT')); return; }
+    // Node clamps larger delays to 1ms. Re-arm long waits against the same deadline.
+    cancelTimer = scheduleTimeout(() => {
+      cancelTimer = undefined;
+      try { armTimeout(); } catch (error) { stop(error); }
+    }, Math.min(2_147_483_647, Math.max(1, Math.ceil(delay))));
+  };
   try {
+    for (const signal of signals) signal.addEventListener('abort', abort, { once: true });
+    assertActive();
+    armTimeout();
     for (;;) {
-      const { done, value } = await Promise.race([reader.read(), stopped]);
+      assertActive();
+      let reading: ReturnType<FormBodyReader['read']>;
+      try { reading = reader.read(); } catch { throw new WireError(400, 'BODY_READ_FAILED'); }
+      const { done, value } = await Promise.race([
+        reading.catch(() => { throw new WireError(400, 'BODY_READ_FAILED'); }), stopped,
+      ]);
+      // A ready read can win the race even after cancellation or a delayed timer.
+      assertActive();
       if (done) break;
       if (value === undefined) continue;
       total += value.byteLength;
@@ -169,12 +238,12 @@ async function readBoundedBody(request: Request, options: FormReadLimits): Promi
       chunks.push(value);
     }
   } catch (error) {
-    void reader.cancel().catch(() => undefined);
+    try { void reader.cancel().catch(() => undefined); } catch { /* Preserve the read failure. */ }
     throw error;
   } finally {
-    clearTimeout(timer);
-    request.signal.removeEventListener('abort', abort);
-    reader.releaseLock();
+    try { cancelTimer?.(); } catch { /* Cleanup must not replace the result. */ }
+    for (const signal of signals) signal.removeEventListener('abort', abort);
+    try { reader.releaseLock(); } catch { /* Preserve the result if the transport already failed. */ }
   }
   const body = new Uint8Array(total);
   let offset = 0;
@@ -189,9 +258,10 @@ async function readBoundedBody(request: Request, options: FormReadLimits): Promi
 export async function readUrlEncodedEntries(
   request: Request,
   options: FormReadLimits,
+  runtime: FormReadRuntime = {},
 ): Promise<readonly FormEntry[]> {
   assertFormTransport(request, options.maxBytes);
-  const bytes = await readBoundedBody(request, options);
+  const bytes = await readBoundedBody(request, options, runtime);
   const entries: FormEntry[] = [];
   const seen = new Set<string>();
   let start = 0;
@@ -223,8 +293,8 @@ export async function readUrlEncodedEntries(
 }
 
 /** Bounded, strict URL-encoded parser for one already-validated request. */
-export async function readUrlEncodedForm(request: Request, options: FormReadOptions): Promise<ParsedForm> {
-  const entries = await readUrlEncodedEntries(request, options);
+export async function readUrlEncodedForm(request: Request, options: FormReadOptions, runtime: FormReadRuntime = {}): Promise<ParsedForm> {
+  const entries = await readUrlEncodedEntries(request, options, runtime);
   let csrf: string | null = null;
   let requestKey: string | null = null;
   const fields: Record<string, string> = Object.create(null);
