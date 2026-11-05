@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readUrlEncodedForm, formReadOptions, WireError } from '../../src/runtime/wire.ts';
+import { readUrlEncodedEntries, readUrlEncodedForm, formReadOptions, WireError } from '../../src/runtime/wire.ts';
 import { SUPPORTED_CSRF_FIELD, SUPPORTED_REQUEST_KEY_FIELD } from '../../src/contract/types.ts';
 
 const http = {
@@ -88,7 +88,7 @@ describe('strict urlencoded parser', () => {
     await expect(parse('quantity=2')).rejects.toMatchObject({ code: 'MISSING_CSRF' });
     await expect(parse('_bc_csrf=tok', { contentType: 'multipart/form-data' })).rejects.toMatchObject({ status: 415 });
     await expect(parse('_bc_csrf=tok', { contentType: 'application/x-www-form-urlencoded; charset=latin1' })).rejects.toMatchObject({
-      status: 415,
+      status: 400,
     });
     await expect(parse('_bc_csrf=tok', { contentEncoding: 'gzip' })).rejects.toMatchObject({ status: 415 });
   });
@@ -100,5 +100,37 @@ describe('strict urlencoded parser', () => {
     const big = new Uint8Array(16385).fill(65);
     await expect(parse(big)).rejects.toMatchObject({ code: 'BODY_TOO_LARGE', status: 413 });
     await expect(parse(`_bc_csrf=tok&x=${'a'.repeat(1025)}`)).rejects.toMatchObject({ code: 'VALUE_TOO_LARGE' });
+  });
+
+  test('shares bounded entry parsing with routes that have no action protocol fields', async () => {
+    const request = new Request('https://example.test/login', {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'tenantId=t&subjectId=s&password=correct+horse',
+    });
+    expect(await readUrlEncodedEntries(request, http)).toEqual([
+      { key: 'tenantId', value: 't' }, { key: 'subjectId', value: 's' }, { key: 'password', value: 'correct horse' },
+    ]);
+  });
+
+  test('cancels a stalled body at its deadline and when the request aborts', async () => {
+    for (const stop of ['timeout', 'abort'] as const) {
+      let cancelled = false;
+      const controller = new AbortController();
+      const stream = new ReadableStream<Uint8Array>({
+        pull: () => new Promise(() => {}),
+        cancel: () => { cancelled = true; },
+      });
+      const request = new Request('https://example.test/login', {
+        method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: stream, signal: controller.signal,
+      });
+      const parsing = readUrlEncodedEntries(request, { ...http, readTimeoutMs: stop === 'timeout' ? 5 : 1000 });
+      if (stop === 'abort') controller.abort();
+      await expect(parsing).rejects.toMatchObject({
+        status: stop === 'timeout' ? 408 : 400,
+        code: stop === 'timeout' ? 'BODY_READ_TIMEOUT' : 'BODY_READ_ABORTED',
+      });
+      expect(cancelled).toBe(true);
+    }
   });
 });

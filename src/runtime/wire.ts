@@ -1,7 +1,7 @@
 import type { HttpContract, ProtocolContract } from '../contract/types.ts';
 
 /** HTTP status codes used by the wire layer. */
-export type WireStatus = 400 | 413 | 415;
+export type WireStatus = 400 | 408 | 413 | 415;
 
 export class WireError extends Error {
   readonly status: WireStatus;
@@ -28,11 +28,15 @@ export interface ParsedForm {
   readonly requestKey: string | null;
 }
 
-export interface FormReadOptions {
+export interface FormReadLimits {
   readonly maxBytes: number;
   readonly maxEntries: number;
   readonly maxKeyBytes: number;
   readonly maxValueBytes: number;
+  readonly readTimeoutMs?: number;
+}
+
+export interface FormReadOptions extends FormReadLimits {
   readonly csrfField: string;
   readonly requestKeyField: string;
   /** Set when the action belongs to an existing intent. */
@@ -109,7 +113,7 @@ function mediaType(request: Request): string {
     let value = parameter.slice(separator + 1).trim();
     if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
     if (name === 'charset') {
-      if (value.toLowerCase() !== 'utf-8') throw new WireError(415, 'UNSUPPORTED_CHARSET');
+      if (value.toLowerCase() !== 'utf-8') throw new WireError(400, 'UNSUPPORTED_CHARSET');
     } else {
       throw new WireError(415, 'UNSUPPORTED_MEDIA_TYPE');
     }
@@ -126,24 +130,50 @@ function contentEncoding(request: Request): void {
   }
 }
 
-async function readBoundedBody(request: Request, maxBytes: number): Promise<Uint8Array> {
+/** Header-only checks run before authentication and before acquiring a body reader. */
+export function assertFormTransport(request: Request, maxBytes: number): void {
+  mediaType(request);
+  contentEncoding(request);
+  const length = request.headers.get('content-length');
+  if (length !== null) {
+    if (!/^[0-9]+$/.test(length)) throw new WireError(400, 'INVALID_CONTENT_LENGTH');
+    if (BigInt(length) > BigInt(maxBytes)) throw new WireError(413, 'BODY_TOO_LARGE');
+  }
+}
+
+async function readBoundedBody(request: Request, options: FormReadLimits): Promise<Uint8Array> {
+  if (request.signal.aborted) throw new WireError(400, 'BODY_READ_ABORTED');
   if (request.body === null) return new Uint8Array(0);
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  const timeoutMs = options.readTimeoutMs ?? 30_000;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    reader.releaseLock();
+    throw new Error('INVALID_BODY_READ_TIMEOUT');
+  }
+  let rejectStop!: (error: WireError) => void;
+  const stopped = new Promise<never>((_, reject) => { rejectStop = reject; });
+  const abort = () => rejectStop(new WireError(400, 'BODY_READ_ABORTED'));
+  request.signal.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => rejectStop(new WireError(408, 'BODY_READ_TIMEOUT')), timeoutMs);
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await Promise.race([reader.read(), stopped]);
       if (done) break;
       if (value === undefined) continue;
       total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel().catch(() => undefined);
+      if (total > options.maxBytes) {
         throw new WireError(413, 'BODY_TOO_LARGE');
       }
       chunks.push(value);
     }
+  } catch (error) {
+    void reader.cancel().catch(() => undefined);
+    throw error;
   } finally {
+    clearTimeout(timer);
+    request.signal.removeEventListener('abort', abort);
     reader.releaseLock();
   }
   const body = new Uint8Array(total);
@@ -155,14 +185,13 @@ async function readBoundedBody(request: Request, maxBytes: number): Promise<Uint
   return body;
 }
 
-/** Bounded, strict URL-encoded parser for one already-validated request. */
-export async function readUrlEncodedForm(
+/** Shared bounded transport parser; route-specific allowlists and protocol checks follow. */
+export async function readUrlEncodedEntries(
   request: Request,
-  options: FormReadOptions,
-): Promise<ParsedForm> {
-  mediaType(request);
-  contentEncoding(request);
-  const bytes = await readBoundedBody(request, options.maxBytes);
+  options: FormReadLimits,
+): Promise<readonly FormEntry[]> {
+  assertFormTransport(request, options.maxBytes);
+  const bytes = await readBoundedBody(request, options);
   const entries: FormEntry[] = [];
   const seen = new Set<string>();
   let start = 0;
@@ -174,7 +203,7 @@ export async function readUrlEncodedForm(
       while (split < end && bytes[split] !== 61) split++;
       const key = decodePart(bytes.subarray(start, split));
       const value = decodePart(bytes.subarray(split < end ? split + 1 : end, end));
-      if (deniedKeys.has(key) || decoderKeyProblem(key, options)) {
+      if (deniedKeys.has(key) || (!businessKey.test(key) && !protocolKey.test(key))) {
         throw new WireError(400, 'INVALID_KEY');
       }
       if (encoder.encode(key).length > options.maxKeyBytes) {
@@ -190,6 +219,12 @@ export async function readUrlEncodedForm(
     start = end + 1;
   }
 
+  return Object.freeze(entries);
+}
+
+/** Bounded, strict URL-encoded parser for one already-validated request. */
+export async function readUrlEncodedForm(request: Request, options: FormReadOptions): Promise<ParsedForm> {
+  const entries = await readUrlEncodedEntries(request, options);
   let csrf: string | null = null;
   let requestKey: string | null = null;
   const fields: Record<string, string> = Object.create(null);
@@ -218,12 +253,6 @@ export async function readUrlEncodedForm(
     csrf,
     requestKey,
   });
-}
-
-function decoderKeyProblem(key: string, options: FormReadOptions): boolean {
-  if (key === options.csrfField || key === options.requestKeyField) return false;
-  if (protocolKey.test(key)) return false;
-  return !businessKey.test(key);
 }
 
 /** Parses the only supported integer codec syntax: canonical decimal, no exponent, no leading zero. */

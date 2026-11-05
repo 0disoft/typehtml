@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,6 +47,44 @@ async function seeded(path: string) {
 }
 
 describe('SQLite recovery', () => {
+  it('resolves uncertain commit acknowledgement through a fresh connection without rerunning work', async () => {
+    for (const timing of ['before-commit', 'after-commit'] as const) {
+      const path = await databasePath();
+      const { store, coordinator } = await seeded(path);
+      const begin = await coordinator.beginDraft(principal, 'p_100');
+      const originalExec = Database.prototype.exec;
+      let writer = false;
+      let injected = false;
+      const fault = spyOn(Database.prototype, 'exec').mockImplementation(function (this: Database, sql: string) {
+        if (sql === 'BEGIN IMMEDIATE') writer = true;
+        if (sql === 'COMMIT' && writer && !injected) {
+          injected = true;
+          if (timing === 'after-commit') originalExec.call(this, sql);
+          throw Object.assign(new Error('injected commit I/O acknowledgement loss'), { code: 'SQLITE_IOERR' });
+        }
+        return originalExec.call(this, sql);
+      });
+      try {
+        const submitted = coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' });
+        if (timing === 'after-commit') {
+          await expect(submitted).resolves.toHaveProperty('location');
+          expect(store.countAudit()).toBe(1);
+        } else {
+          await expect(submitted).rejects.toMatchObject({ status: 503, code: 'COMMIT_UNCERTAIN' });
+          expect(store.countAudit()).toBe(0);
+          await expect(coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' }))
+            .resolves.toHaveProperty('location');
+          expect(store.countAudit()).toBe(1);
+        }
+        expect(injected).toBe(true);
+        expect(store.auditInconsistencies()).toEqual([]);
+      } finally {
+        fault.mockRestore();
+        store.close();
+      }
+    }
+  });
+
   it('returns the same receipt when the first response is lost after commit', async () => {
     const path = await databasePath();
     const { store, coordinator } = await seeded(path);

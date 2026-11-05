@@ -1,6 +1,8 @@
 import { Database } from 'bun:sqlite';
 import type { OrderInput, Principal, Product, Draft } from '../../runtime/order.ts';
-import type { Grant } from '../../runtime/order-bindings.ts';
+import type { Grant, GrantScope, GrantIssuer } from '../../runtime/order-bindings.ts';
+import { assertSynchronous } from '../../runtime/sync.ts';
+import { hashValidatedInput } from '../../runtime/input.ts';
 import type {
   OrderReadTx,
   OrderStorage,
@@ -139,6 +141,28 @@ function isBusyError(error: unknown): boolean {
   return code === 'SQLITE_BUSY' || code === 'SQLITE_BUSY_SNAPSHOT' || /SQLITE_BUSY/.test(error.message);
 }
 
+/** Escaped handles must not perform work after the owning callback finishes. */
+function scopedTransaction<T extends OrderReadTx>(target: T, write = false): { tx: T; finish: () => void; assertActive: () => void } {
+  let active = true;
+  const assertActive = () => { if (!active) throw new Error('TRANSACTION_CLOSED'); };
+  const methods = new Set([
+    'currentMember', 'countOpenIntents', 'loadProduct', 'loadIntent', 'loadResult', 'readDraft', 'readDraftByIntent',
+    ...(write ? ['insertIntent', 'insertDraftIfRevision', 'consumeIntent', 'insertResult', 'insertAudit'] : []),
+  ]);
+  const tx = new Proxy(Object.freeze(Object.create(null)) as T, {
+    get(_object, key) {
+      if (typeof key !== 'string' || !methods.has(key)) return undefined;
+      const value: unknown = Reflect.get(target, key);
+      if (typeof value !== 'function') return undefined;
+      return (...args: unknown[]) => {
+        assertActive();
+        return Reflect.apply(value, target, args);
+      };
+    },
+  });
+  return { tx, finish: () => { active = false; }, assertActive };
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS memberships (
   tenant_id TEXT NOT NULL,
@@ -228,6 +252,15 @@ class SqliteReadTx implements OrderReadTx {
     return row !== null;
   }
 
+  countOpenIntents(tenantId: string, subjectId: string, actionId: string, now: number): number {
+    const row = this.db.query(
+      `SELECT COUNT(*) AS count FROM form_intents
+        WHERE tenant_id = ? AND subject_id = ? AND action_id = ?
+          AND consumed_at IS NULL AND expires_at > ?`,
+    ).get(tenantId, subjectId, actionId, now) as { count: number };
+    return row.count;
+  }
+
   loadProduct(tenantId: string, productId: string): Product | null {
     const row = this.db
       .query(
@@ -289,6 +322,14 @@ class SqliteReadTx implements OrderReadTx {
 }
 
 class SqliteWriteTx extends SqliteReadTx implements OrderWriteTx {
+  private readonly grants = new WeakSet<Grant>();
+
+  issueGrant(scope: GrantScope): Grant {
+    const grant = Object.freeze({ ...scope, principal: Object.freeze({ ...scope.principal }) }) as Grant;
+    this.grants.add(grant);
+    return grant;
+  }
+
   insertIntent(intent: StoredIntent): void {
     this.db
       .query(
@@ -319,13 +360,20 @@ class SqliteWriteTx extends SqliteReadTx implements OrderWriteTx {
     now: number;
   }>): Draft | null {
     const { principal, input, product, grant } = args;
+    if (!this.grants.delete(grant)) throw new Error('GRANT_NOT_ACTIVE');
+    if (grant.principal.tenantId !== principal.tenantId || grant.principal.subjectId !== principal.subjectId ||
+        grant.principal.sessionId !== principal.sessionId || product.tenantId !== principal.tenantId || grant.resourceId !== product.id ||
+        grant.resourceId !== input.productId || grant.resourceRevision !== product.revision ||
+        grant.operation !== 'orders.createDraft' || grant.inputHash !== hashValidatedInput(input)) {
+      throw new Error('GRANT_SCOPE_MISMATCH');
+    }
     const orderId = grant.draftId;
     const result = this.db
       .query(
         `INSERT INTO order_drafts
            (id, intent_id, tenant_id, subject_id, product_id, product_revision,
             quantity, total_minor, currency, state)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'KRW', 'draft'
+         SELECT ?, ?, ?, ?, ?, ?, ?, p.price_minor * ?, p.currency, 'draft'
            FROM form_intents AS fi
            JOIN products AS p
              ON p.tenant_id = fi.tenant_id AND p.id = fi.product_id
@@ -344,6 +392,7 @@ class SqliteWriteTx extends SqliteReadTx implements OrderWriteTx {
             AND p.revision = ?
             AND p.active = 1
             AND m.active = 1
+            AND p.price_minor <= 9007199254740991 / ?
             AND ? BETWEEN 1 AND 20`,
       )
       .run(
@@ -354,7 +403,7 @@ class SqliteWriteTx extends SqliteReadTx implements OrderWriteTx {
         input.productId,
         product.revision,
         input.quantity,
-        input.quantity * product.priceMinor,
+        input.quantity,
         grant.intentId,
         principal.tenantId,
         principal.subjectId,
@@ -365,6 +414,7 @@ class SqliteWriteTx extends SqliteReadTx implements OrderWriteTx {
         args.now,
         product.revision,
         product.revision,
+        input.quantity,
         input.quantity,
       );
     if (result.changes !== 1) return null;
@@ -441,7 +491,8 @@ export type AuditFinding = Readonly<{
 }>;
 
 export class SqliteOrderStore implements OrderStorage {
-  private readonly db: Database;
+  private db: Database;
+  private quarantined = false;
   private readonly busyRetryBudgetMs: number;
   private readonly retryAfterSeconds: number;
   private readonly busyMaxWaitMs: number;
@@ -453,6 +504,12 @@ export class SqliteOrderStore implements OrderStorage {
     this.retryAfterSeconds = options.retryAfterSeconds ?? DEFAULT_RETRY_AFTER_SECONDS;
     this.busyMaxWaitMs = options.busyMaxWaitMs ?? DEFAULT_BUSY_MAX_WAIT_MS;
     this.now = options.now ?? Date.now;
+    if (!Number.isFinite(this.busyRetryBudgetMs) || this.busyRetryBudgetMs < 0 ||
+        !Number.isFinite(this.busyMaxWaitMs) || this.busyMaxWaitMs <= 0 ||
+        !Number.isSafeInteger(this.retryAfterSeconds) || this.retryAfterSeconds < 1) {
+      this.db.close();
+      throw new Error('INVALID_SQLITE_RETRY_OPTIONS');
+    }
     this.configure();
     this.migrate();
   }
@@ -479,58 +536,96 @@ export class SqliteOrderStore implements OrderStorage {
     this.db.exec(SCHEMA);
   }
 
-  read<T>(work: (tx: OrderReadTx) => T): T {
-    this.db.exec('BEGIN');
+  private quarantineConnection(): void {
+    this.quarantined = true;
+    this.db.close(true);
+  }
+
+  private rollbackOrQuarantine(original: unknown): void {
+    if (this.quarantined || !this.db.inTransaction) return;
+    let rollbackFailure: unknown;
     try {
-      const value = work(new SqliteReadTx(this.db));
+      this.db.exec('ROLLBACK');
+    } catch (error) {
+      rollbackFailure = error;
+    }
+    if (!this.db.inTransaction) return;
+    try {
+      this.quarantineConnection();
+    } catch (closeFailure) {
+      throw new StoreCommitError('SQLITE_ROLLBACK_FAILED', {
+        cause: new AggregateError([original, rollbackFailure, closeFailure], 'Could not end the failed transaction'),
+      });
+    }
+    throw new StoreCommitError('SQLITE_ROLLBACK_FAILED', {
+      cause: new AggregateError([original, rollbackFailure], 'Could not end the failed transaction'),
+    });
+  }
+
+  read<T>(work: (tx: OrderReadTx) => T): T {
+    if (this.quarantined) throw new StoreCommitError('SQLITE_CONNECTION_QUARANTINED');
+    this.db.exec('BEGIN');
+    const scoped = scopedTransaction(new SqliteReadTx(this.db));
+    try {
+      const value = assertSynchronous(work(scoped.tx));
+      scoped.finish();
       this.db.exec('COMMIT');
       return value;
     } catch (error) {
-      try {
-        this.db.exec('ROLLBACK');
-      } catch {
-        // Preserve the original failure.
-      }
+      scoped.finish();
+      this.rollbackOrQuarantine(error);
       throw error;
     }
   }
 
-  async immediate<T>(work: (tx: OrderWriteTx) => T): Promise<T> {
-    const deadline = this.now() + this.busyRetryBudgetMs;
+  async immediate<T>(work: (tx: OrderWriteTx, issueGrant: GrantIssuer) => T): Promise<T> {
+    if (this.quarantined) throw new StoreCommitError('SQLITE_CONNECTION_QUARANTINED');
+    const deadline = performance.now() + this.busyRetryBudgetMs;
     while (true) {
       try {
         this.db.exec('BEGIN IMMEDIATE');
         break;
       } catch (error) {
-        if (!isBusyError(error) || this.now() >= deadline) {
+        if (!isBusyError(error) || performance.now() >= deadline) {
           if (isBusyError(error)) throw new StoreBusyError(this.retryAfterSeconds);
           throw error;
         }
-        await Bun.sleep(Math.min(this.busyMaxWaitMs, Math.max(1, deadline - this.now())));
+        await Bun.sleep(Math.min(this.busyMaxWaitMs, Math.max(1, deadline - performance.now())));
       }
     }
+    const transaction = new SqliteWriteTx(this.db);
+    const scoped = scopedTransaction(transaction, true);
     try {
-      const value = work(new SqliteWriteTx(this.db));
+      const value = assertSynchronous(work(scoped.tx, (scope) => {
+        scoped.assertActive();
+        return transaction.issueGrant(scope);
+      }));
+      scoped.finish();
       try {
         this.db.exec('COMMIT');
       } catch (error) {
-        try {
-          this.db.exec('ROLLBACK');
-        } catch {
-          // Preserve the commit failure.
-        }
+        this.rollbackOrQuarantine(error);
         if (isBusyError(error)) throw new StoreBusyError(this.retryAfterSeconds);
+        this.quarantineConnection();
         throw new StoreCommitError('SQLITE_COMMIT_FAILED', { cause: error });
       }
       return value;
     } catch (error) {
-      try {
-        this.db.exec('ROLLBACK');
-      } catch {
-        // Preserve the original failure.
-      }
+      scoped.finish();
+      this.rollbackOrQuarantine(error);
       throw error;
     }
+  }
+
+  recoverRead<T>(work: (tx: OrderReadTx) => T): T {
+    const filename = this.db.filename;
+    if (filename === ':memory:') throw new StoreCommitError('SQLITE_RECOVERY_REQUIRES_DURABLE_DATABASE');
+    this.quarantined = true;
+    this.db.close();
+    this.db = new Database(filename, { strict: true, readwrite: true });
+    this.configure();
+    this.quarantined = false;
+    return this.read(work);
   }
 
   seedMembership(tenantId: string, subjectId: string, active = true): void {
@@ -597,7 +692,8 @@ export class SqliteOrderStore implements OrderStorage {
                  OR (i.consumed_at IS NOT NULL AND r.intent_id IS NOT NULL AND d.id = r.draft_id
                      AND r.behavior_hash = i.behavior_hash AND r.completed_at = i.consumed_at
                      AND d.tenant_id = i.tenant_id AND d.subject_id = i.subject_id
-                     AND d.product_id = i.product_id AND r.expires_at <= ?)
+                     AND d.product_id = i.product_id AND d.product_revision = i.resource_revision
+                     AND r.expires_at <= ?)
               ORDER BY i.issued_at LIMIT ?
             )`,
         )
@@ -623,7 +719,8 @@ export class SqliteOrderStore implements OrderStorage {
                    OR r.behavior_hash IS NOT i.behavior_hash OR r.completed_at IS NOT i.consumed_at)
                    THEN 'RESULT_METADATA_MISMATCH'
                  WHEN d.id IS NOT NULL AND (d.tenant_id IS NOT i.tenant_id
-                   OR d.subject_id IS NOT i.subject_id OR d.product_id IS NOT i.product_id)
+                   OR d.subject_id IS NOT i.subject_id OR d.product_id IS NOT i.product_id
+                   OR d.product_revision IS NOT i.resource_revision)
                    THEN 'DRAFT_SCOPE_MISMATCH'
                END AS reason,
                i.issued_at

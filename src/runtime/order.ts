@@ -1,3 +1,6 @@
+import type { OrderInput, PublicReceipt, OrderPageView } from '../generated/order-contract.ts';
+export type { OrderInput, PublicReceipt, OrderPageView } from '../generated/order-contract.ts';
+
 export type Principal = Readonly<{
   subjectId: string;
   tenantId: string;
@@ -14,8 +17,6 @@ export type Product = Readonly<{
   currency: 'KRW';
 }>;
 
-export type OrderInput = Readonly<{ productId: string; quantity: number }>;
-
 export type Draft = Readonly<{
   orderId: string;
   intentId: string;
@@ -27,21 +28,6 @@ export type Draft = Readonly<{
   totalMinor: number;
   currency: 'KRW';
   state: 'draft';
-}>;
-
-export type PublicReceipt = Readonly<{
-  orderId: string;
-  state: 'draft';
-  totalMinor: number;
-  currency: 'KRW';
-}>;
-
-export type OrderPageView = Readonly<{
-  productId: string;
-  productName: string;
-  unitPriceMinor: number;
-  currency: 'KRW';
-  productRevision: number;
 }>;
 
 export type PageTarget =

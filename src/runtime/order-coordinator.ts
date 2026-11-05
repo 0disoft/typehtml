@@ -2,7 +2,7 @@ import type { LoadedBoundaryContract } from '../contract/types.ts';
 import { validateBusinessInput, hashValidatedInput, type InputValidation } from './input.ts';
 import type { IntentDecision, IntentSnapshot, SubmissionInput } from './intent.ts';
 import { decideIntent } from './intent.ts';
-import type { OrderBindings, Grant } from './order-bindings.ts';
+import type { OrderBindings } from './order-bindings.ts';
 import type { OrderReadTx, OrderStorage, StoredIntent } from './order-storage.ts';
 import {
   newDraftId,
@@ -14,12 +14,13 @@ import {
   type PageTarget,
   type Principal,
   type PublicReceipt,
+  type OrderPageView,
 } from './order.ts';
 import { validateOutputObject, OutputValidationError } from './output.ts';
 import { assertSynchronous } from './sync.ts';
 
 export class OrderFailure extends Error {
-  readonly status: 400 | 401 | 403 | 404 | 405 | 409 | 410 | 413 | 415 | 422 | 500 | 503;
+  readonly status: 400 | 401 | 403 | 404 | 405 | 409 | 410 | 413 | 415 | 422 | 429 | 500 | 503;
   readonly code: string;
   readonly retryAfterSeconds: number | null;
   readonly formState: FormState | null;
@@ -43,6 +44,7 @@ export type OrderCoordinatorOptions = Readonly<{
   bindings: OrderBindings;
   storage: OrderStorage;
   now?: () => number;
+  maxOpenIntents?: number;
 }>;
 
 export type BeginResult = Readonly<{ intentId: string; location: string }>;
@@ -55,12 +57,17 @@ export class OrderCoordinator {
   private readonly bindings: OrderBindings;
   private readonly storage: OrderStorage;
   private readonly now: () => number;
+  private readonly maxOpenIntents: number;
 
   constructor(options: OrderCoordinatorOptions) {
     this.loaded = options.loaded;
     this.bindings = options.bindings;
     this.storage = options.storage;
     this.now = options.now ?? Date.now;
+    this.maxOpenIntents = options.maxOpenIntents ?? 20;
+    if (!Number.isSafeInteger(this.maxOpenIntents) || this.maxOpenIntents < 1) {
+      throw new Error('INVALID_OPEN_INTENT_LIMIT');
+    }
   }
 
   private get actionId(): string {
@@ -72,18 +79,23 @@ export class OrderCoordinator {
   }
 
   async beginDraft(principal: Principal, rawProductId: string): Promise<BeginResult> {
+    principal = Object.freeze({ ...principal });
     if (rawProductId.length === 0 || rawProductId.length > 64) {
       throw new OrderFailure(400, 'INVALID_PRODUCT_ID');
     }
-    const now = this.clock();
     const intentId = newIntentId();
-    const expiresAt = now + this.loaded.contract.guards.idempotency.intentTtlSeconds * 1000;
     try {
       await this.storage.immediate((tx) => {
-        const product = assertSynchronous(
+        const now = this.clock();
+        const expiresAt = now + this.loaded.contract.guards.idempotency.intentTtlSeconds * 1000;
+        const prepared = assertSynchronous(
           this.bindings.prepareIntent({ tx, principal, productId: rawProductId }),
         );
-        if (product === null) throw new OrderFailure(404, 'NOT_FOUND');
+        if (prepared === null) throw new OrderFailure(404, 'NOT_FOUND');
+        const product = Object.freeze({ ...prepared });
+        if (tx.countOpenIntents(principal.tenantId, principal.subjectId, this.actionId, now) >= this.maxOpenIntents) {
+          throw new OrderFailure(429, 'OPEN_INTENT_LIMIT', { retryAfterSeconds: 1 });
+        }
         const intent: StoredIntent = {
           id: intentId,
           tenantId: principal.tenantId,
@@ -99,7 +111,18 @@ export class OrderCoordinator {
         tx.insertIntent(intent);
       });
     } catch (error) {
-      throw mapBusy(error);
+      if (isCommitError(error)) {
+        this.recoverCommit((tx) => {
+          const decision = decideIntent(this.snapshotFrom(tx, principal, intentId), { kind: 'view' }, this.clock(), this.behaviorSha256);
+          if (decision.kind === 'form') return true;
+          if (decision.kind === 'error' && decision.code !== 'INTENT_UNAVAILABLE') {
+            throw new OrderFailure(decision.status, decision.code);
+          }
+          return null;
+        });
+      } else {
+        throw mapBusy(error);
+      }
     }
     const template = this.loaded.contract.page.intentInitialization.location;
     return {
@@ -113,6 +136,7 @@ export class OrderCoordinator {
     intentId: string,
     fields: Readonly<Record<string, string>>,
   ): Promise<SubmitResult> {
+    principal = Object.freeze({ ...principal });
     const now = this.clock();
     const validation = validateBusinessInput(this.loaded.contract.input, fields);
     if (!validation.ok && validation.unknownKeys.length > 0) {
@@ -128,6 +152,7 @@ export class OrderCoordinator {
   }
 
   resolvePage(principal: Principal, target: PageTarget): PageResolution {
+    principal = Object.freeze({ ...principal });
     return this.storage.read((tx) => {
       if (!tx.currentMember(principal.tenantId, principal.subjectId)) {
         return { kind: 'failure', status: 404, code: 'NOT_FOUND' } as const;
@@ -137,7 +162,7 @@ export class OrderCoordinator {
         if (product === null || !product.active) {
           return { kind: 'failure', status: 404, code: 'NOT_FOUND' } as const;
         }
-        return { kind: 'start', view: toPageView(product) } as const;
+        return { kind: 'start', view: this.validatePageView(toPageView(product)) } as const;
       }
       const snapshot = this.snapshotFrom(tx, principal, target.intentId);
       const decision = decideIntent(snapshot, { kind: 'view' }, this.clock(), this.behaviorSha256);
@@ -146,7 +171,7 @@ export class OrderCoordinator {
         if (product === null || !product.active) {
           return { kind: 'failure', status: 404, code: 'NOT_FOUND' } as const;
         }
-        return { kind: 'form', intentId: target.intentId, view: toPageView(product) } as const;
+        return { kind: 'form', intentId: target.intentId, view: this.validatePageView(toPageView(product)) } as const;
       }
       if (decision.kind === 'receipt') {
         return { kind: 'receipt', output: this.receiptView(tx, principal, decision.orderId) } as const;
@@ -159,21 +184,23 @@ export class OrderCoordinator {
   }
 
   resolveReceipt(principal: Principal, orderId: string): PublicReceipt {
+    principal = Object.freeze({ ...principal });
     return this.storage.read((tx) => this.receiptView(tx, principal, orderId));
   }
 
   private receiptView(tx: OrderReadTx, principal: Principal, orderId: string): PublicReceipt {
-    const draft = assertSynchronous(this.bindings.loadReceipt({ tx, principal, orderId }));
-    if (draft === null) throw new OrderFailure(404, 'NOT_FOUND');
+    const loadedDraft = assertSynchronous(this.bindings.loadReceipt({ tx, principal, orderId }));
+    if (loadedDraft === null) throw new OrderFailure(404, 'NOT_FOUND');
+    const draft = Object.freeze({ ...loadedDraft });
     const decision = assertSynchronous(this.bindings.authorizeReceipt({ principal, receipt: draft }));
     if (!decision.allow) throw new OrderFailure(404, 'NOT_FOUND');
     const intent = tx.loadIntent(principal.tenantId, principal.subjectId, this.actionId, draft.intentId);
     if (intent === null) throw new OrderFailure(410, 'RESULT_EXPIRED');
-    const result = tx.loadResult(draft.intentId);
-    if (result === null) throw new OrderFailure(500, 'INTENT_STATE_INVALID');
-    if (this.clock() >= result.expiresAt) throw new OrderFailure(410, 'RESULT_EXPIRED');
+    const state = decideIntent(this.snapshotFrom(tx, principal, draft.intentId), { kind: 'view' }, this.clock(), this.behaviorSha256);
+    if (state.kind === 'error') throw new OrderFailure(state.status, state.code);
+    if (state.kind !== 'receipt' || state.orderId !== orderId) throw new OrderFailure(500, 'INTENT_STATE_INVALID');
     const output = assertSynchronous(this.bindings.projectReceipt(draft));
-    return this.validateReceipt(output);
+    return this.validateReceipt(output, orderId);
   }
 
   private async resolveSubmitDecision(
@@ -186,20 +213,22 @@ export class OrderCoordinator {
       case 'error':
         throw new OrderFailure(decision.status, decision.code);
       case 'receipt':
-        return { kind: 'receipt', location: this.receiptLocation(decision.orderId) };
-      case 'needs-input': {
-        const snapshot = this.readSnapshot(principal, intentId);
-        if (snapshot !== null && snapshot.consumedAt !== null) {
-          throw new OrderFailure(409, 'COMPLETED_INPUT_CONFLICT');
-        }
-        return { kind: 'invalid' };
-      }
-      case 'invalid': {
-        const fresh = this.readSnapshot(principal, intentId);
-        const freshDecision = decideIntent(fresh, this.submission(validation), this.clock(), this.behaviorSha256);
-        if (freshDecision.kind === 'invalid') return { kind: 'invalid' };
-        return this.resolveSubmitDecision(principal, intentId, validation, freshDecision);
-      }
+      case 'needs-input':
+      case 'invalid':
+        return this.storage.read((tx) => {
+          const fresh = this.snapshotFrom(tx, principal, intentId);
+          const final = decideIntent(fresh, this.submission(validation), this.clock(), this.behaviorSha256);
+          if (final.kind === 'error') throw new OrderFailure(final.status, final.code);
+          if (final.kind === 'receipt') {
+            this.receiptView(tx, principal, final.orderId);
+            return { kind: 'receipt', location: this.receiptLocation(final.orderId) } as const;
+          }
+          if (final.kind === 'needs-input' && fresh?.consumedAt !== null) {
+            throw new OrderFailure(409, 'COMPLETED_INPUT_CONFLICT');
+          }
+          if (final.kind === 'invalid' || final.kind === 'needs-input') return { kind: 'invalid' } as const;
+          throw new OrderFailure(500, 'INTENT_STATE_INVALID');
+        });
       case 'write-candidate':
         return this.writeCandidate(principal, intentId, validation);
       case 'form':
@@ -213,28 +242,32 @@ export class OrderCoordinator {
     validation: InputValidation,
   ): Promise<{ kind: 'receipt'; location: string }> {
     if (!validation.ok) throw new OrderFailure(409, 'COMPLETED_INPUT_CONFLICT');
-    const input: OrderInput = {
+    const input: OrderInput = Object.freeze({
       productId: validation.value.productId as string,
       quantity: validation.value.quantity as number,
-    };
+    });
     const inputHash = hashValidatedInput(validation.value);
     let location: string;
     try {
-      location = await this.storage.immediate((tx) => {
+      location = await this.storage.immediate((tx, issueGrant) => {
         const lockedAt = this.clock();
         const snapshot = this.snapshotFrom(tx, principal, intentId);
         const freshDecision = decideIntent(snapshot, this.submission(validation), lockedAt, this.behaviorSha256);
-        if (freshDecision.kind === 'receipt') return this.receiptLocation(freshDecision.orderId);
+        if (freshDecision.kind === 'receipt') {
+          this.receiptView(tx, principal, freshDecision.orderId);
+          return this.receiptLocation(freshDecision.orderId);
+        }
         if (freshDecision.kind === 'error') throw new OrderFailure(freshDecision.status, freshDecision.code);
         if (freshDecision.kind !== 'write-candidate') {
           throw new OrderFailure(409, 'COMPLETED_INPUT_CONFLICT');
         }
-        const product = assertSynchronous(this.bindings.load({ tx, principal, input }));
-        if (product === null) throw new OrderFailure(404, 'NOT_FOUND');
+        const loadedProduct = assertSynchronous(this.bindings.load({ tx, principal, input }));
+        if (loadedProduct === null) throw new OrderFailure(404, 'NOT_FOUND');
+        const product = Object.freeze({ ...loadedProduct });
         const allowed = assertSynchronous(this.bindings.authorize({ principal, input, resource: product }));
         if (!allowed.allow) throw new OrderFailure(404, 'NOT_FOUND');
 
-        const grant: Grant = {
+        const grant = issueGrant({
           principal,
           resourceId: product.id,
           resourceRevision: product.revision,
@@ -244,7 +277,7 @@ export class OrderCoordinator {
           intentId,
           behaviorSha256: this.behaviorSha256,
           inputHash,
-        };
+        });
         let draft;
         try {
           draft = assertSynchronous(this.bindings.execute({ tx, principal, input, resource: product, grant, now: lockedAt }));
@@ -254,11 +287,12 @@ export class OrderCoordinator {
           }
           throw error;
         }
+        draft = Object.freeze({ ...draft });
         if (!tx.consumeIntent({ intentId, principal, behaviorHash: this.behaviorSha256, now: lockedAt })) {
           throw new OrderFailure(409, 'CAS_CONFLICT');
         }
         const output = assertSynchronous(this.bindings.project(draft));
-        const validated = this.validateReceipt(output);
+        const validated = this.validateReceipt(output, draft.orderId);
         tx.insertResult({
           intentId,
           draftId: draft.orderId,
@@ -271,6 +305,18 @@ export class OrderCoordinator {
         return this.receiptLocation(validated.orderId);
       });
     } catch (error) {
+      if (isCommitError(error)) {
+        const recovered = this.recoverCommit((tx) => {
+          const decision = decideIntent(this.snapshotFrom(tx, principal, intentId), this.submission(validation), this.clock(), this.behaviorSha256);
+          if (decision.kind === 'receipt') {
+            this.receiptView(tx, principal, decision.orderId);
+            return this.receiptLocation(decision.orderId);
+          }
+          if (decision.kind === 'error') throw new OrderFailure(decision.status, decision.code);
+          return null;
+        });
+        return { kind: 'receipt', location: recovered };
+      }
       throw mapBusy(error);
     }
     return { kind: 'receipt', location };
@@ -280,12 +326,27 @@ export class OrderCoordinator {
     return this.storage.read((tx) => this.snapshotFrom(tx, principal, intentId));
   }
 
+  private recoverCommit<T>(work: (tx: OrderReadTx) => T | null): T {
+    try {
+      const recovered = this.storage.recoverRead?.(work);
+      if (recovered !== undefined && recovered !== null) return recovered;
+    } catch (error) {
+      if (error instanceof OrderFailure) throw error;
+    }
+    throw new OrderFailure(503, 'COMMIT_UNCERTAIN', { retryAfterSeconds: 1 });
+  }
+
   private snapshotFrom(tx: OrderReadTx, principal: Principal, intentId: string): CoordinatorSnapshot | null {
     const intent = tx.loadIntent(principal.tenantId, principal.subjectId, this.actionId, intentId);
     if (intent === null) return null;
     const result = tx.loadResult(intent.id);
     const draft = tx.readDraftByIntent(intent.id);
     const product = tx.loadProduct(intent.tenantId, intent.productId);
+    const currentAuthorized = tx.currentMember(intent.tenantId, intent.subjectId);
+    if (currentAuthorized && draft !== null && (
+      draft.tenantId !== intent.tenantId || draft.subjectId !== intent.subjectId ||
+      draft.productId !== intent.productId || draft.productRevision !== intent.resourceRevision
+    )) throw new OrderFailure(500, 'INTENT_STATE_INVALID');
     return {
       intentId: intent.id,
       productId: intent.productId,
@@ -303,7 +364,7 @@ export class OrderCoordinator {
             completedAt: result.completedAt,
             expiresAt: result.expiresAt,
           },
-      currentAuthorized: tx.currentMember(intent.tenantId, intent.subjectId),
+      currentAuthorized,
       resourceRevisionMatches:
         product !== null && product.active && product.revision === intent.resourceRevision,
     };
@@ -337,8 +398,8 @@ export class OrderCoordinator {
     }
     return {
       rawValues: {
-        ...(Object.hasOwn(fields, 'productId') ? { productId: fields.productId } : {}),
-        ...(Object.hasOwn(fields, 'quantity') ? { quantity: fields.quantity } : {}),
+        ...(this.echoable(fields, 'productId') ? { productId: fields.productId } : {}),
+        ...(this.echoable(fields, 'quantity') ? { quantity: fields.quantity } : {}),
       },
       fieldErrors,
       formErrors,
@@ -347,15 +408,30 @@ export class OrderCoordinator {
     };
   }
 
+  private echoable(fields: Readonly<Record<string, string>>, key: string): boolean {
+    return Object.hasOwn(fields, key) && new TextEncoder().encode(fields[key]).byteLength <= this.loaded.contract.http.maxValueBytes;
+  }
+
   private receiptLocation(orderId: string): string {
     return this.loaded.contract.response.receipt.path.replace(':orderId', encodeURIComponent(orderId));
   }
 
-  private validateReceipt(value: PublicReceipt): PublicReceipt {
+  private validateReceipt(value: PublicReceipt, expectedOrderId: string): PublicReceipt {
     try {
-      return validateOutputObject(this.loaded.contract.output.schema, value) as unknown as PublicReceipt;
+      const output = validateOutputObject(this.loaded.contract.output.schema, value) as unknown as PublicReceipt;
+      if (output.orderId !== expectedOrderId) throw new OutputValidationError('$.orderId', 'must identify the committed draft');
+      return output;
     } catch (error) {
       if (error instanceof OutputValidationError) throw new OrderFailure(500, 'OUTPUT_INVALID');
+      throw error;
+    }
+  }
+
+  private validatePageView(value: OrderPageView): OrderPageView {
+    try {
+      return validateOutputObject(this.loaded.contract.page.viewSchema, value) as unknown as OrderPageView;
+    } catch (error) {
+      if (error instanceof OutputValidationError) throw new OrderFailure(500, 'PAGE_VIEW_INVALID');
       throw error;
     }
   }
@@ -371,6 +447,10 @@ function busyRetryAfter(error: unknown): number | null {
   if (!(error instanceof Error) || error.name !== 'StoreBusyError') return null;
   const value = (error as Error & { retryAfterSeconds?: unknown }).retryAfterSeconds;
   return typeof value === 'number' ? value : 1;
+}
+
+function isCommitError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'StoreCommitError';
 }
 
 function mapBusy(error: unknown): unknown {

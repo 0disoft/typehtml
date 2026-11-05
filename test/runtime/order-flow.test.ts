@@ -5,6 +5,7 @@ import { SqliteOrderStore } from '../../src/adapter/sqlite/order-store.ts';
 import { createOrderBindings, type OrderBindings } from '../../src/runtime/order-bindings.ts';
 import { OrderCoordinator, OrderFailure } from '../../src/runtime/order-coordinator.ts';
 import type { Principal, Product } from '../../src/runtime/order.ts';
+import type { OrderStorage } from '../../src/runtime/order-storage.ts';
 
 const CONTRACT = resolve(import.meta.dir, '../../docs/design/v0.5/examples/order.boundary.json');
 
@@ -172,5 +173,136 @@ describe('order coordinator and SQLite adapter', () => {
     const other: Principal = { ...principal, subjectId: 'subject_2' };
     expect(coordinator.resolvePage(other, { kind: 'product', productId: 'p_100' }).kind).toBe('failure');
     expect(store.read((tx) => tx.currentMember('tenant_1', 'subject_2'))).toBe(false);
+  });
+
+  it('applies current receipt authorization to successful POST replays', async () => {
+    let allowed = true;
+    const base = createOrderBindings();
+    const { store, coordinator } = await setup({ bindings: {
+      ...base,
+      authorizeReceipt: () => ({ allow: allowed }),
+    } });
+    const { begin } = await beginAndSubmit(coordinator);
+    allowed = false;
+    await expect(coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' }))
+      .rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    expect(store.countAudit()).toBe(1);
+    store.close();
+  });
+
+  it('rechecks expiry, membership, and revision before a missing-field 422', async () => {
+    for (const change of ['expiry', 'membership', 'revision'] as const) {
+      let now = 1_000_000;
+      const { store, coordinator, loaded } = await setup({ now: () => now });
+      const begin = await coordinator.beginDraft(principal, 'p_100');
+      let reads = 0;
+      const storage: OrderStorage = {
+        read: (work) => {
+          if (++reads === 2) {
+            if (change === 'expiry') now += 86_400_000;
+            if (change === 'membership') store.seedMembership('tenant_1', 'subject_1', false);
+            if (change === 'revision') store.setProductRevision('tenant_1', 'p_100', 8, 13000);
+          }
+          return store.read(work);
+        },
+        immediate: (work) => store.immediate(work),
+      };
+      const fresh = new OrderCoordinator({ loaded, bindings: createOrderBindings(), storage, now: () => now });
+      await expect(fresh.submitIntent(principal, begin.intentId, { productId: 'p_100' }))
+        .rejects.toMatchObject({ status: { expiry: 410, membership: 404, revision: 409 }[change] });
+      store.close();
+    }
+  });
+
+  it('limits OPEN intents atomically and releases capacity after completion or expiry', async () => {
+    let now = 1_000_000;
+    const { store, loaded } = await setup({ now: () => now });
+    const coordinator = new OrderCoordinator({
+      loaded, bindings: createOrderBindings(), storage: store, now: () => now, maxOpenIntents: 1,
+    });
+    const first = await coordinator.beginDraft(principal, 'p_100');
+    await expect(coordinator.beginDraft(principal, 'p_100'))
+      .rejects.toMatchObject({ status: 429, code: 'OPEN_INTENT_LIMIT' });
+    expect(store.countIntents()).toBe(1);
+    await coordinator.submitIntent(principal, first.intentId, { productId: 'p_100', quantity: '2' });
+    await coordinator.beginDraft(principal, 'p_100');
+    now += 86_400_000;
+    await expect(coordinator.beginDraft(principal, 'p_100')).resolves.toHaveProperty('intentId');
+    store.close();
+  });
+
+  it('rejects a valid-looking projection for a different draft and rolls back', async () => {
+    const { store, coordinator } = await setup({ bindings: {
+      ...createOrderBindings(),
+      project: () => ({ orderId: `draft_${crypto.randomUUID()}`, state: 'draft', totalMinor: 24000, currency: 'KRW' }),
+    } });
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    await expect(coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' }))
+      .rejects.toMatchObject({ status: 500, code: 'OUTPUT_INVALID' });
+    expect(store.read((tx) => tx.readDraftByIntent(begin.intentId))).toBeNull();
+    expect(store.countAudit()).toBe(0);
+    store.close();
+  });
+
+  it('bounds raw echo even when called without the HTTP parser', async () => {
+    const { store, coordinator } = await setup();
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    await expect(coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '1'.repeat(1025) }))
+      .rejects.toMatchObject({ status: 422, formState: { rawValues: { productId: 'p_100' } } });
+    store.close();
+  });
+
+  it('validates public page projections on both start and intent form reads', async () => {
+    const { store, coordinator } = await setup();
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    store.seedProduct({ ...product(), name: 'x'.repeat(1000) });
+    for (const target of [{ kind: 'product', productId: 'p_100' }, { kind: 'intent', intentId: begin.intentId }] as const) {
+      expect(() => coordinator.resolvePage(principal, target))
+        .toThrow(expect.objectContaining({ status: 500, code: 'PAGE_VIEW_INVALID' }));
+    }
+    store.close();
+  });
+
+  it('freezes validated input and authority facts before invoking application callbacks', async () => {
+    const base = createOrderBindings();
+    const { store, coordinator } = await setup({ bindings: {
+      ...base,
+      authorize: ({ principal: caller, input, resource }) => {
+        expect(Object.isFrozen(caller)).toBe(true);
+        expect(Object.isFrozen(input)).toBe(true);
+        expect(Object.isFrozen(resource)).toBe(true);
+        expect(() => { (input as { quantity: number }).quantity = 20; }).toThrow();
+        return { allow: true };
+      },
+      execute: (context) => {
+        expect(Object.isFrozen(context.grant)).toBe(true);
+        expect(Object.isFrozen(context.grant.principal)).toBe(true);
+        return base.execute(context);
+      },
+    } });
+    const { begin, receipt } = await beginAndSubmit(coordinator);
+    const draft = store.read((tx) => tx.readDraftByIntent(begin.intentId));
+    expect(draft?.quantity).toBe(2);
+    expect(coordinator.resolveReceipt(principal, receipt.location.split('/').pop()!).totalMinor).toBe(24000);
+    await expect(coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' }))
+      .resolves.toEqual(receipt);
+    store.close();
+  });
+
+  it('rejects stateful public projection accessors without invoking them', async () => {
+    let getterCalls = 0;
+    const { store, coordinator } = await setup({ bindings: {
+      ...createOrderBindings(),
+      project: (draft) => ({
+        orderId: draft.orderId, state: 'draft', currency: 'KRW',
+        get totalMinor() { return ++getterCalls === 1 ? 24000 : -1; },
+      }),
+    } });
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    await expect(coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' }))
+      .rejects.toMatchObject({ status: 500, code: 'OUTPUT_INVALID' });
+    expect(getterCalls).toBe(0);
+    expect(store.read((tx) => tx.readDraftByIntent(begin.intentId))).toBeNull();
+    store.close();
   });
 });

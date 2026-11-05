@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,6 +34,36 @@ async function databasePath(): Promise<string> {
 }
 
 describe('SQLite sessions and credentials', () => {
+  it('rolls back session rotation if issuing the replacement fails', async () => {
+    const sessions = new SqliteSessionStore(await databasePath());
+    const original = sessions.create(principal);
+    const failure = spyOn(sessions, 'create').mockImplementation(() => { throw new Error('session write failed'); });
+    try {
+      expect(() => sessions.rotate(original.id)).toThrow('session write failed');
+      expect(sessions.get(original.id)?.csrfToken).toBe(original.csrfToken);
+    } finally {
+      failure.mockRestore();
+      sessions.close();
+    }
+  });
+
+  it('rejects credentials revoked while password verification is in flight', async () => {
+    const credentials = new SqliteCredentialStore(await databasePath());
+    await credentials.seed('tenant_1', 'subject_1', 'correct horse');
+    let finish!: (matches: boolean) => void;
+    const verification = new Promise<boolean>((resolve) => { finish = resolve; });
+    const password = spyOn(Bun.password, 'verify').mockImplementation(() => verification);
+    try {
+      const pending = credentials.verify('tenant_1', 'subject_1', 'correct horse');
+      await credentials.seed('tenant_1', 'subject_1', 'correct horse', false);
+      finish(true);
+      await expect(pending).resolves.toBeNull();
+    } finally {
+      password.mockRestore();
+      credentials.close();
+    }
+  });
+
   it('shares a session and CSRF token across two instances', async () => {
     const path = await databasePath();
     const a = new SqliteSessionStore(path);

@@ -5,7 +5,7 @@ import type { SyncResult } from './sync.ts';
 
 export type Decision = Readonly<{ allow: true }> | Readonly<{ allow: false }>;
 
-export type Grant = Readonly<{
+export type GrantScope = Readonly<{
   principal: Principal;
   resourceId: string;
   resourceRevision: number;
@@ -16,6 +16,10 @@ export type Grant = Readonly<{
   behaviorSha256: string;
   inputHash: string;
 }>;
+
+declare const grantIdentity: unique symbol;
+export type Grant = GrantScope & Readonly<{ [grantIdentity]: true }>;
+export type GrantIssuer = (scope: GrantScope) => Grant;
 
 export interface OrderBindings {
   prepareIntent(

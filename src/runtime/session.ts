@@ -12,7 +12,7 @@ export interface SessionStore {
   get(id: string): Session | null;
   create(principal: Principal): Session;
   rotate(id: string): Session | null;
-  revoke? (id: string): void;
+  revoke(id: string): void;
 }
 
 export interface CredentialStore {

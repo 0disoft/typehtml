@@ -20,16 +20,25 @@ export function validateOutputObject(
   value: unknown,
 ): Readonly<Record<string, unknown>> {
   if (!isObject(value)) throw new OutputValidationError('$', 'must be an object');
-  const keys = Object.keys(value);
+  const snapshot: Record<string, unknown> = Object.create(null);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string') throw new OutputValidationError('$', 'symbol keys are unsupported');
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) {
+      throw new OutputValidationError(`$.${key}`, 'must be an own data property');
+    }
+    snapshot[key] = descriptor.value;
+  }
+  const keys = Object.keys(snapshot);
   for (const key of keys) {
     if (!Object.hasOwn(schema.properties, key)) throw new OutputValidationError(`$.${key}`, 'unknown key');
   }
   for (const key of schema.required) {
-    if (!Object.hasOwn(value, key)) throw new OutputValidationError(`$.${key}`, 'required');
+    if (!Object.hasOwn(snapshot, key)) throw new OutputValidationError(`$.${key}`, 'required');
   }
   for (const [key, field] of Object.entries(schema.properties)) {
-    if (!Object.hasOwn(value, key)) continue;
-    const item = value[key];
+    if (!Object.hasOwn(snapshot, key)) continue;
+    const item = snapshot[key];
     const path = `$.${key}`;
     if (field.type === 'string') {
       if (typeof item !== 'string') throw new OutputValidationError(path, 'must be a string');
@@ -55,5 +64,5 @@ export function validateOutputObject(
       if (field.enum !== undefined && !field.enum.includes(item)) throw new OutputValidationError(path, 'enum mismatch');
     }
   }
-  return Object.freeze({ ...value });
+  return Object.freeze(snapshot);
 }

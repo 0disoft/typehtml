@@ -15,6 +15,9 @@ function isThenable(value: unknown): boolean {
  * the transaction boundary before the rollback decision.
  */
 export function assertSynchronous<T>(value: T): SyncResult<T> {
-  if (isThenable(value)) throw new Error('ASYNC_ROLE_RESULT');
+  if (isThenable(value)) {
+    if (value instanceof Promise) void value.catch(() => undefined);
+    throw new Error('ASYNC_ROLE_RESULT');
+  }
   return value as SyncResult<T>;
 }

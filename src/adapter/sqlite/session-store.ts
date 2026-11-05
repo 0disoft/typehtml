@@ -31,6 +31,7 @@ export class SqliteSessionStore implements SessionStore {
 
   constructor(filename: string, options: SqliteSessionStoreOptions = {}) {
     this.ttlSeconds = options.ttlSeconds ?? 8 * 60 * 60;
+    if (!Number.isSafeInteger(this.ttlSeconds) || this.ttlSeconds < 1) throw new Error('INVALID_SESSION_TTL');
     this.now = options.now ?? Date.now;
     this.db = new Database(filename, { strict: true });
     this.db.exec('PRAGMA foreign_keys = ON');
@@ -73,10 +74,12 @@ export class SqliteSessionStore implements SessionStore {
   }
 
   rotate(id: string): Session | null {
-    const current = this.get(id);
-    if (current === null) return null;
-    this.db.query('DELETE FROM auth_sessions WHERE token_hash = ?').run(hashToken(id));
-    return this.create(current.principal);
+    return this.db.transaction(() => {
+      const current = this.get(id);
+      if (current === null) return null;
+      this.db.query('DELETE FROM auth_sessions WHERE token_hash = ?').run(hashToken(id));
+      return this.create(current.principal);
+    }).immediate();
   }
 
   revoke(id: string): void {
@@ -135,7 +138,12 @@ export class SqliteCredentialStore implements CredentialStore {
     } catch {
       matches = false;
     }
-    return matches ? { tenantId, subjectId, sessionId: '' } : null;
+    if (!matches) return null;
+    const current = this.db
+      .query('SELECT password_hash FROM auth_credentials WHERE tenant_id = ? AND subject_id = ? AND active = 1')
+      .get(tenantId, subjectId) as CredentialRow | null;
+    if (current === null || current.password_hash !== row.password_hash) return null;
+    return { tenantId, subjectId, sessionId: '' };
   }
 
   close(): void {

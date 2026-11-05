@@ -1,5 +1,5 @@
 import type { Principal, Product, Draft, OrderInput } from './order.ts';
-import type { Grant } from './order-bindings.ts';
+import type { Grant, GrantIssuer } from './order-bindings.ts';
 
 export type StoredIntent = Readonly<{
   id: string;
@@ -25,6 +25,7 @@ export type StoredResult = Readonly<{
 
 export interface OrderReadTx {
   currentMember(tenantId: string, subjectId: string): boolean;
+  countOpenIntents(tenantId: string, subjectId: string, actionId: string, now: number): number;
   loadProduct(tenantId: string, productId: string): Product | null;
   loadIntent(tenantId: string, subjectId: string, actionId: string, intentId: string): StoredIntent | null;
   loadResult(intentId: string): StoredResult | null;
@@ -58,5 +59,7 @@ export interface OrderWriteTx extends OrderReadTx {
 
 export interface OrderStorage {
   read<T>(work: (tx: OrderReadTx) => T): T;
-  immediate<T>(work: (tx: OrderWriteTx) => T): Promise<T>;
+  immediate<T>(work: (tx: OrderWriteTx, issueGrant: GrantIssuer) => T): Promise<T>;
+  /** Reread durable state on a fresh connection after an uncertain commit. */
+  recoverRead?<T>(work: (tx: OrderReadTx) => T): T;
 }

@@ -33,6 +33,22 @@ async function temporaryDatabase(): Promise<string> {
 }
 
 describe('SQLite writer contention', () => {
+  it('bounds lock retries even when the business clock is frozen', async () => {
+    const filename = await temporaryDatabase();
+    const store = new SqliteOrderStore(filename, { now: () => 1_000_000, busyRetryBudgetMs: 20, busyMaxWaitMs: 5 });
+    const blocker = new Database(filename, { strict: true });
+    blocker.exec('BEGIN IMMEDIATE');
+    const started = performance.now();
+    try {
+      await expect(store.immediate(() => 1)).rejects.toBeInstanceOf(StoreBusyError);
+      expect(performance.now() - started).toBeLessThan(1000);
+    } finally {
+      blocker.exec('ROLLBACK');
+      blocker.close();
+      store.close();
+    }
+  });
+
   it('fails the second writer with StoreBusyError and recovers after release', async () => {
     const filename = await temporaryDatabase();
     const first = new SqliteOrderStore(filename, { busyRetryBudgetMs: 100, busyMaxWaitMs: 10 });
@@ -134,5 +150,26 @@ describe('SQLite writer contention', () => {
     expect(() => coordinator.resolveReceipt(principal, orderId)).toThrow(
       expect.objectContaining({ status: 410, code: 'RESULT_EXPIRED' }),
     );
+  });
+
+  it('rejects corrupt receipt metadata and preserves its evidence during expiry cleanup', async () => {
+    let now = 1_000_000;
+    const filename = await temporaryDatabase();
+    const store = new SqliteOrderStore(filename, { now: () => now });
+    store.seedMembership('tenant_1', 'subject_1', true);
+    store.seedProduct(product);
+    const loaded = await loadBoundaryContract(CONTRACT);
+    const coordinator = new OrderCoordinator({ loaded, bindings: createOrderBindings(), storage: store, now: () => now });
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    const receipt = await coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' });
+    const raw = new Database(filename, { strict: true });
+    raw.query('UPDATE action_results SET completed_at = completed_at + 1 WHERE intent_id = ?').run(begin.intentId);
+    raw.close();
+    expect(() => coordinator.resolveReceipt(principal, receipt.location.split('/').pop()!))
+      .toThrow(expect.objectContaining({ status: 500, code: 'INTENT_STATE_INVALID' }));
+    now += 86_400_000;
+    expect(await store.cleanupExpired()).toBe(0);
+    expect(store.auditInconsistencies()).toEqual([{ intentId: begin.intentId, reason: 'RESULT_METADATA_MISMATCH' }]);
+    store.close();
   });
 });

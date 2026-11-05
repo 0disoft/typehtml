@@ -56,6 +56,15 @@ describe('business input validation', () => {
     expect(validateBusinessInput(input, { productId: '😀😀😀😀', quantity: '1', note: '😀😀😀😀' }).ok).toBe(false);
   });
 
+  test('lets the schema decide whether canonical negative integers are allowed', () => {
+    const signed: InputContract = {
+      ...input,
+      schema: { ...input.schema, properties: { ...input.schema.properties, quantity: { type: 'integer', minimum: -20, maximum: 20 } } },
+    };
+    expect(validateBusinessInput(signed, { productId: 'p', quantity: '-2' })).toMatchObject({ ok: true, value: { quantity: -2 } });
+    expect(validateBusinessInput(input, { productId: 'p', quantity: '-2' }).ok).toBe(false);
+  });
+
   test('hashes canonical decoded input and preserves type tags', () => {
     const a = validateBusinessInput(input, { productId: 'p', quantity: '2' });
     const b = validateBusinessInput(input, { quantity: '2', productId: 'p' });

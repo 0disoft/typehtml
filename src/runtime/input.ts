@@ -61,7 +61,6 @@ function validateField(field: string, schema: FieldSchema, raw: string): string 
     }
     throw error;
   }
-  if (integer < 0) return { field, code: 'SIGN', message: `${field} must not be negative` };
   if (schema.minimum !== undefined && integer < schema.minimum) {
     return { field, code: 'MINIMUM', message: `${field} must be at least ${schema.minimum}` };
   }
@@ -106,7 +105,7 @@ export function validateBusinessInput(input: InputContract, fields: Readonly<Rec
   const raw: Record<string, string> = Object.create(null);
   for (const key of Object.keys(value)) raw[key] = fields[key]!;
   if (issues.length > 0) return { ok: false, issues, unknownKeys: [] };
-  return { ok: true, value, raw };
+  return { ok: true, value: Object.freeze(value), raw: Object.freeze(raw) };
 }
 
 export function hashValidatedInput(value: Readonly<Record<string, string | number>>): string {
