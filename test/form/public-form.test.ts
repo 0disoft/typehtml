@@ -220,4 +220,131 @@ describe('public generic forms', () => {
     expect(response.status).toBe(422);
     expect(await response.text()).toBe('<p>custom invalid form</p>');
   });
+
+  it('keeps a pending request policy stable without mutating or freezing caller configuration', async () => {
+    const phases: string[] = [];
+    const origins = [origin];
+    const principal = { id: 'person', token: 'synthetic-token' };
+    let finish!: (value: Principal) => void;
+    const authenticated = new Promise<Principal>((resolvePrincipal) => { finish = resolvePrincipal; });
+    const config = {
+      ...options(), allowedOrigins: origins,
+      authenticate: () => authenticated,
+      authorize: () => { phases.push('original deny'); return false; },
+      execute: () => { phases.push('execute'); throw new Error('must not execute'); },
+    };
+    const handle = createFormHandler(form, config);
+    const pending = handle(request(valid));
+    config.authorize = () => { phases.push('replacement allow'); return true; };
+    origins.splice(0, 1, 'http://foreign.test');
+    finish(principal);
+    const response = await pending;
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain('NOT_FOUND');
+    expect(phases).toEqual(['original deny']);
+    expect(config.allowedOrigins).toBe(origins);
+    expect(origins).toEqual(['http://foreign.test']);
+    expect(Object.isFrozen(config)).toBe(false);
+    expect(Object.isFrozen(origins)).toBe(false);
+    expect(Object.isFrozen(principal)).toBe(false);
+    expect(principal).toEqual({ id: 'person', token: 'synthetic-token' });
+  });
+
+  it('preserves inherited hook methods and their original mutable receiver', async () => {
+    class Hooks {
+      allowedOrigins = [origin];
+      phases: string[] = [];
+      fail = false;
+      authenticate() { this.phases.push('authenticate'); return { id: 'person', token: 'synthetic-token' }; }
+      csrfToken({ principal }: { principal: Readonly<Principal> }) { this.phases.push('csrf'); return principal.token; }
+      authorize() { this.phases.push('authorize'); return true; }
+      execute() {
+        this.phases.push('execute');
+        if (this.fail) throw new Error('private failure');
+        return { message: 'ok', state: 'sent' as const, privateNote: 'private' };
+      }
+      project({ message, state }: Result) { this.phases.push('project'); return { message, state }; }
+      success() { this.phases.push('success'); return { location: '/thanks' }; }
+      invalid() { this.phases.push('invalid'); return '<p>invalid</p>'; }
+      onError() { this.phases.push('onError'); throw new Error('logging failure'); }
+    }
+    const config = new Hooks();
+    const handle = createFormHandler(form, config);
+    expect((await handle(request(valid))).status).toBe(303);
+    expect(config.phases).toEqual(['authenticate', 'csrf', 'authorize', 'execute', 'project', 'success']);
+    config.phases.length = 0;
+    expect((await handle(request({ ...valid, copies: '100' }))).status).toBe(422);
+    expect(config.phases).toEqual(['authenticate', 'csrf', 'invalid']);
+    config.phases.length = 0;
+    config.fail = true;
+    const failed = await handle(request(valid));
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).not.toContain('private failure');
+    expect(config.phases).toEqual(['authenticate', 'csrf', 'authorize', 'execute', 'onError']);
+  });
+
+  it('invokes captured hooks independently of caller-owned function properties', async () => {
+    const events: string[] = [];
+    const deny = () => { events.push('deny'); return false; };
+    const handle = createFormHandler(form, {
+      ...options(), authorize: deny,
+      execute: () => { events.push('execute'); throw new Error('must not run'); },
+    });
+    Object.defineProperty(deny, 'call', { value: () => true });
+    const response = await handle(request(valid));
+    expect(response.status).toBe(404);
+    expect(events).toEqual(['deny']);
+  });
+
+  it('preserves short-circuit order when multiple request conditions are invalid', async () => {
+    const phases: string[] = [];
+    const config = options();
+    const handle = createFormHandler(form, {
+      ...config,
+      authenticate(req) { phases.push('authenticate'); return config.authenticate(req); },
+      csrfToken(context) { phases.push('csrf'); return config.csrfToken(context); },
+      authorize() { phases.push('authorize'); return false; },
+      execute() { phases.push('execute'); throw new Error('must not run'); },
+      invalid() { phases.push('invalid'); return '<p>invalid</p>'; },
+    });
+    const cases: [Request, number, string, string[]][] = [
+      [request(valid, { method: 'PUT', headers: { accept: 'application/json' } }, '/other?x=1'), 404, 'NOT_FOUND', []],
+      [request(valid, { method: 'PUT', headers: { accept: 'application/json' } }, '/feedback?x=1'), 405, 'METHOD_NOT_ALLOWED', []],
+      [request(valid, { headers: { accept: 'application/json' } }, '/feedback?x=1'), 400, 'UNEXPECTED_QUERY', []],
+      [request(valid, { headers: { accept: 'application/json', 'content-type': 'multipart/form-data' } }), 406, 'NOT_ACCEPTABLE_HTML', []],
+      [request(valid, { headers: { origin: 'http://foreign.test', 'content-type': 'multipart/form-data' } }), 415, 'UNSUPPORTED_MEDIA_TYPE', []],
+      [request(valid, { headers: { origin: 'http://foreign.test' } }), 403, 'ORIGIN_NOT_ALLOWED', []],
+      [request({ ...valid, _bc_csrf: 'wrong', copies: 'invalid', extra: 'x' }), 403, 'CSRF_INVALID', ['authenticate', 'csrf']],
+      [request({ ...valid, copies: 'invalid', extra: 'x' }), 400, 'UNKNOWN_FIELD', ['authenticate', 'csrf']],
+      [request({ ...valid, copies: 'invalid' }), 422, 'invalid', ['authenticate', 'csrf', 'invalid']],
+      [request(valid), 404, 'NOT_FOUND', ['authenticate', 'csrf', 'authorize']],
+    ];
+    for (const [req, status, body, expectedPhases] of cases) {
+      phases.length = 0;
+      const response = await handle(req);
+      expect(response.status).toBe(status);
+      expect(await response.text()).toContain(body);
+      expect(phases).toEqual(expectedPhases);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    }
+  });
+
+  it('maps rejected async render and completion hooks through the existing error response', async () => {
+    const events: string[] = [];
+    const invalid = createFormHandler(form, {
+      ...options(), invalid: async () => { throw new FormHttpError(409, 'INVALID_FORM_CHANGED'); },
+      onError: () => { events.push('unexpected logging'); },
+    });
+    const invalidResponse = await invalid(request({ ...valid, copies: '100' }));
+    expect(invalidResponse.status).toBe(409);
+    expect(await invalidResponse.text()).toContain('INVALID_FORM_CHANGED');
+    const complete = createFormHandler(form, {
+      ...options(), project: async () => { throw new Error('private projection failure'); },
+      onError: (error) => { expect((error as Error).message).toBe('private projection failure'); events.push('logged'); },
+    });
+    const failed = await complete(request(valid));
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).not.toContain('private projection failure');
+    expect(events).toEqual(['logged']);
+  });
 });

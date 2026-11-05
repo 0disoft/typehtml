@@ -1,4 +1,4 @@
-import type { ObjectSchema } from '../contract/types.ts';
+import { SUPPORTED_CSRF_FIELD, SUPPORTED_REQUEST_KEY_FIELD, type ObjectSchema } from '../contract/types.ts';
 import { assertCsrfToken, CsrfError } from '../runtime/csrf.ts';
 import { validateBusinessInput, type InputIssue } from '../runtime/input.ts';
 import { acceptsHtml, assertRequestOrigin, NegotiationError } from '../runtime/negotiation.ts';
@@ -8,6 +8,9 @@ import type { DefinedForm, InferSchema } from './definition.ts';
 import { renderFailure, renderFormErrors } from './html.ts';
 
 type MaybePromise<T> = T | Promise<T>;
+
+/** Native form submission: invalid input stays on the form; success redirects to a GET. */
+const NATIVE_FORM_STATUS = { invalid: 422, success: 303 } as const;
 
 export interface FormContext<Input, Principal> {
   readonly request: Request;
@@ -53,7 +56,24 @@ function html(status: number, body: string, extra?: HeadersInit): Response {
   return new Response(body, { status, headers });
 }
 
-/** Native POST boundary for any supported flat form; no implicit authentication, DB, or replay store. */
+function failure(status: number, code: string, extra?: HeadersInit): Response {
+  return html(status, renderFailure(status, code), extra);
+}
+
+type HandlerConfig<I extends ObjectSchema, O extends ObjectSchema, Principal extends object, Result> = Readonly<{
+  form: DefinedForm<I, O>;
+  hooks: FormHandlerOptions<I, O, Principal, Result>;
+  receiver: FormHandlerOptions<I, O, Principal, Result>;
+}>;
+
+function invokeHook<Args extends unknown[], Value>(hook: (...args: Args) => Value, receiver: unknown, args: Args): Value {
+  return Reflect.apply(hook, receiver, args);
+}
+
+/**
+ * Native POST boundary for a flat form; callback references are captured at creation.
+ * Hooks retain the caller's receiver. No implicit authentication, DB, or replay store.
+ */
 export function createFormHandler<I extends ObjectSchema, O extends ObjectSchema, Principal extends object, Result>(
   form: DefinedForm<I, O>, options: FormHandlerOptions<I, O, Principal, Result>,
 ): (request: Request) => Promise<Response> {
@@ -63,51 +83,94 @@ export function createFormHandler<I extends ObjectSchema, O extends ObjectSchema
     const url = new URL(origin);
     if (!['http:', 'https:'].includes(url.protocol) || url.origin !== origin) throw new TypeError('allowed origins must be serialized HTTP(S) origins');
   }
-  return async (request) => {
-    try {
-      const url = new URL(request.url);
-      if (url.pathname !== form.path) return html(404, renderFailure(404, 'NOT_FOUND'));
-      if (request.method !== 'POST') return html(405, renderFailure(405, 'METHOD_NOT_ALLOWED'), { Allow: 'POST' });
-      if (url.search !== '') return html(400, renderFailure(400, 'UNEXPECTED_QUERY'));
-      if (!acceptsHtml(request.headers.get('accept'))) return html(406, renderFailure(406, 'NOT_ACCEPTABLE_HTML'));
-      assertFormTransport(request, form.limits.maxBytes);
-      assertRequestOrigin(request, { allowedOrigins: origins });
-      const authenticated = await options.authenticate(request);
-      if (authenticated === null) return html(401, renderFailure(401, 'UNAUTHENTICATED'));
-      if (typeof authenticated !== 'object' || Array.isArray(authenticated)) throw new TypeError('authenticate must return a principal object or null');
-      const principal = Object.freeze({ ...authenticated });
-      const parsed = await readUrlEncodedForm(request, {
-        ...form.limits, csrfField: '_bc_csrf', requestKeyField: '_bc_request', expectRequestKey: false,
-      });
-      const expected = await options.csrfToken({ request, principal });
-      if (typeof expected !== 'string' || expected.length === 0) throw new CsrfError();
-      assertCsrfToken(parsed.csrf, expected);
-      const validation = validateBusinessInput(form.input, parsed.fields);
-      if (!validation.ok) {
-        if (validation.unknownKeys.length > 0) return html(400, renderFailure(400, 'UNKNOWN_FIELD'));
-        const context = Object.freeze({ request, principal, rawValues: parsed.fields, issues: validation.issues, csrfToken: expected });
-        const body = options.invalid === undefined
-          ? renderFormErrors(form.path, form.input.schema, parsed.fields, validation.issues, expected)
-          : await options.invalid(context);
-        if (typeof body !== 'string') throw new TypeError('invalid renderer must return HTML');
-        return html(422, body);
-      }
-      const context = Object.freeze({ request, principal, input: validation.value as InferSchema<I> });
-      if (await options.authorize(context) !== true) return html(404, renderFailure(404, 'NOT_FOUND'));
-      const result = await options.execute(context);
-      const projected = await options.project(result);
-      const output = validateOutputObject(form.output, projected) as InferSchema<O>;
-      const success = await options.success(output);
-      if (success === null || typeof success !== 'object' || typeof success.location !== 'string') throw new TypeError('success must return a location');
-      const target = new URL(success.location, url.origin);
-      if (target.origin !== url.origin || !success.location.startsWith('/') || success.location.startsWith('//') || /[\r\n\\]/.test(success.location)) throw new TypeError('success location must be a same-origin absolute path');
-      return html(303, '', { Location: target.pathname + target.search + target.hash });
-    } catch (error) {
-      if (error instanceof WireError || error instanceof NegotiationError || error instanceof CsrfError || error instanceof FormHttpError) {
-        return html(error.status, renderFailure(error.status, error.code));
-      }
-      try { options.onError?.(error, request); } catch { /* Logging must not replace the generic response. */ }
-      return html(500, renderFailure(500, 'INTERNAL_ERROR'));
-    }
-  };
+  // Copy the callback table without freezing or changing the caller-owned receiver.
+  const hooks = Object.freeze({
+    allowedOrigins: origins,
+    authenticate: options.authenticate, csrfToken: options.csrfToken, authorize: options.authorize,
+    execute: options.execute, project: options.project, success: options.success,
+    invalid: options.invalid, onError: options.onError,
+  });
+  const config = { form, hooks, receiver: options };
+  return (request) => handleRequest(request, config);
+}
+
+/** Request checks have no hooks or body reads, so their precedence is explicit. */
+function rejectRequest(request: Request, url: URL, path: string): Response | null {
+  if (url.pathname !== path) return failure(404, 'NOT_FOUND');
+  if (request.method !== 'POST') return failure(405, 'METHOD_NOT_ALLOWED', { Allow: 'POST' });
+  if (url.search !== '') return failure(400, 'UNEXPECTED_QUERY');
+  if (!acceptsHtml(request.headers.get('accept'))) return failure(406, 'NOT_ACCEPTABLE_HTML');
+  return null;
+}
+
+async function handleRequest<I extends ObjectSchema, O extends ObjectSchema, Principal extends object, Result>(
+  request: Request, config: HandlerConfig<I, O, Principal, Result>,
+): Promise<Response> {
+  const { form, hooks, receiver } = config;
+  try {
+    const url = new URL(request.url);
+    const rejected = rejectRequest(request, url, form.path);
+    if (rejected !== null) return rejected;
+    assertFormTransport(request, form.limits.maxBytes);
+    assertRequestOrigin(request, { allowedOrigins: hooks.allowedOrigins });
+    const authenticated = await invokeHook(hooks.authenticate, receiver, [request]);
+    if (authenticated === null) return failure(401, 'UNAUTHENTICATED');
+    if (typeof authenticated !== 'object' || Array.isArray(authenticated)) throw new TypeError('authenticate must return a principal object or null');
+    const principal = Object.freeze({ ...authenticated });
+    const parsed = await readUrlEncodedForm(request, {
+      ...form.limits, csrfField: SUPPORTED_CSRF_FIELD, requestKeyField: SUPPORTED_REQUEST_KEY_FIELD, expectRequestKey: false,
+    });
+    const expected = await invokeHook(hooks.csrfToken, receiver, [{ request, principal }]);
+    if (typeof expected !== 'string' || expected.length === 0) throw new CsrfError();
+    assertCsrfToken(parsed.csrf, expected);
+    const validation = validateBusinessInput(form.input, parsed.fields);
+    if (!validation.ok && validation.unknownKeys.length > 0) return failure(400, 'UNKNOWN_FIELD');
+    if (!validation.ok) return await invalidResponse(Object.freeze({
+      request, principal, rawValues: parsed.fields, issues: validation.issues, csrfToken: expected,
+    }), config);
+    const context = Object.freeze({ request, principal, input: validation.value as InferSchema<I> });
+    if (await invokeHook(hooks.authorize, receiver, [context]) !== true) return failure(404, 'NOT_FOUND');
+    return await completeForm(context, url, config);
+  } catch (error) {
+    return errorResponse(error, request, hooks.onError, receiver);
+  }
+}
+
+async function invalidResponse<I extends ObjectSchema, O extends ObjectSchema, Principal extends object, Result>(
+  context: InvalidFormContext<Principal>, config: HandlerConfig<I, O, Principal, Result>,
+): Promise<Response> {
+  const { form, hooks, receiver } = config;
+  const body = hooks.invalid === undefined
+    ? renderFormErrors(form.path, form.input.schema, context.rawValues, context.issues, context.csrfToken)
+    : await invokeHook(hooks.invalid, receiver, [context]);
+  if (typeof body !== 'string') throw new TypeError('invalid renderer must return HTML');
+  return html(NATIVE_FORM_STATUS.invalid, body);
+}
+
+async function completeForm<I extends ObjectSchema, O extends ObjectSchema, Principal extends object, Result>(
+  context: FormContext<InferSchema<I>, Principal>, url: URL, config: HandlerConfig<I, O, Principal, Result>,
+): Promise<Response> {
+  const { form, hooks, receiver } = config;
+  const result = await invokeHook(hooks.execute, receiver, [context]);
+  const projected = await invokeHook(hooks.project, receiver, [result]);
+  const output = validateOutputObject(form.output, projected) as InferSchema<O>;
+  const success = await invokeHook(hooks.success, receiver, [output]);
+  return html(NATIVE_FORM_STATUS.success, '', { Location: successLocation(success, url.origin) });
+}
+
+/** Pure redirect calculation; it neither modifies nor returns the caller's object. */
+function successLocation(success: Readonly<{ location: string }>, origin: string): string {
+  if (success === null || typeof success !== 'object' || typeof success.location !== 'string') throw new TypeError('success must return a location');
+  const location = success.location;
+  const target = new URL(location, origin);
+  if (target.origin !== origin || !location.startsWith('/') || location.startsWith('//') || /[\r\n\\]/.test(location)) throw new TypeError('success location must be a same-origin absolute path');
+  return target.pathname + target.search + target.hash;
+}
+
+function errorResponse(error: unknown, request: Request, onError: ((error: unknown, request: Request) => void) | undefined, receiver: unknown): Response {
+  if (error instanceof WireError || error instanceof NegotiationError || error instanceof CsrfError || error instanceof FormHttpError) {
+    return failure(error.status, error.code);
+  }
+  try { if (onError !== undefined) invokeHook(onError, receiver, [error, request]); } catch { /* Logging must not replace the generic response. */ }
+  return failure(500, 'INTERNAL_ERROR');
 }
