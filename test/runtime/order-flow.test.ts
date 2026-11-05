@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { resolve } from 'node:path';
 import { loadBoundaryContract } from '../../src/contract/load.ts';
 import { SqliteOrderStore } from '../../src/adapter/sqlite/order-store.ts';
-import { createOrderBindings } from '../../src/runtime/order-bindings.ts';
+import { createOrderBindings, type OrderBindings } from '../../src/runtime/order-bindings.ts';
 import { OrderCoordinator, OrderFailure } from '../../src/runtime/order-coordinator.ts';
 import type { Principal, Product } from '../../src/runtime/order.ts';
 
@@ -22,7 +22,7 @@ function product(revision = 7, priceMinor = 12000, active = true): Product {
   };
 }
 
-async function setup(options: Readonly<{ now?: () => number; product?: Product }> = {}) {
+async function setup(options: Readonly<{ now?: () => number; product?: Product; bindings?: OrderBindings }> = {}) {
   const current = options.now ?? (() => 1_000_000);
   const store = new SqliteOrderStore(':memory:', { now: current });
   store.seedMembership('tenant_1', 'subject_1', true);
@@ -30,11 +30,11 @@ async function setup(options: Readonly<{ now?: () => number; product?: Product }
   const loaded = await loadBoundaryContract(CONTRACT);
   const coordinator = new OrderCoordinator({
     loaded,
-    bindings: createOrderBindings(),
+    bindings: options.bindings ?? createOrderBindings(),
     storage: store,
     now: current,
   });
-  return { store, coordinator };
+  return { store, coordinator, loaded };
 }
 
 async function beginAndSubmit(coordinator: OrderCoordinator) {
@@ -120,6 +120,50 @@ describe('order coordinator and SQLite adapter', () => {
     const orderId = receipt.location.split('/').pop()!;
     store.setProductRevision('tenant_1', 'p_100', 9, 15000);
     expect(coordinator.resolveReceipt(principal, orderId).totalMinor).toBe(24000);
+  });
+
+  it('does not create an intent on start or repeated form reads', async () => {
+    const { store, coordinator } = await setup();
+    expect(coordinator.resolvePage(principal, { kind: 'product', productId: 'p_100' }).kind).toBe('start');
+    expect(store.countIntents()).toBe(0);
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    expect(store.countIntents()).toBe(1);
+    expect(coordinator.resolvePage(principal, { kind: 'intent', intentId: begin.intentId }).kind).toBe('form');
+    expect(coordinator.resolvePage(principal, { kind: 'intent', intentId: begin.intentId }).kind).toBe('form');
+    expect(store.countIntents()).toBe(1);
+  });
+
+  it('rolls back the draft, consumed intent, result, and audit when projection fails', async () => {
+    const base = createOrderBindings();
+    const broken: OrderBindings = {
+      ...base,
+      project: () => ({ orderId: 'not-a-draft-id', state: 'draft', totalMinor: 24000, currency: 'KRW' }),
+    };
+    const { store, coordinator } = await setup({ bindings: broken });
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    await expect(
+      coordinator.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' }),
+    ).rejects.toThrow('OUTPUT_INVALID');
+    expect(store.read((tx) => tx.loadIntent('tenant_1', 'subject_1', 'orders.createDraft', begin.intentId))?.consumedAt).toBeNull();
+    expect(store.read((tx) => tx.readDraftByIntent(begin.intentId))).toBeNull();
+    expect(store.read((tx) => tx.loadResult(begin.intentId))).toBeNull();
+    expect(store.countAudit()).toBe(0);
+  });
+
+  it('reports consumed-without-result as a state failure', async () => {
+    const { store, coordinator, loaded } = await setup();
+    const begin = await coordinator.beginDraft(principal, 'p_100');
+    store.immediate((tx) => tx.consumeIntent({
+      intentId: begin.intentId,
+      principal,
+      behaviorHash: loaded.behaviorSha256,
+      now: 1_000_000,
+    }));
+    expect(coordinator.resolvePage(principal, { kind: 'intent', intentId: begin.intentId })).toEqual({
+      kind: 'failure',
+      status: 500,
+      code: 'INTENT_STATE_INVALID',
+    });
   });
 
   it('rejects missing membership and inactive products', async () => {

@@ -107,6 +107,29 @@ describe('Hono order adapter', () => {
     expect(body).toContain('_bc_csrf');
   });
 
+  it('creates no intent for start GET, HEAD, or prefetch and one for begin POST', async () => {
+    const { app, cookie, session, store } = await setup();
+    const prefetch = await app.request('/orders/new?productId=p_100', {
+      headers: { cookie, accept: 'text/html', 'sec-purpose': 'prefetch' },
+    });
+    expect(prefetch.status).toBe(200);
+    expect(store.countIntents()).toBe(0);
+    const head = await app.request('/orders/new?productId=p_100', {
+      method: 'HEAD',
+      headers: { cookie, accept: 'text/html' },
+    });
+    expect(head.status).toBe(200);
+    expect(store.countIntents()).toBe(0);
+    const started = await post(
+      app,
+      '/actions/orders/begin-draft',
+      cookie,
+      formBody({ _bc_csrf: session.csrfToken, productId: 'p_100' }),
+    );
+    expect(started.status).toBe(303);
+    expect(store.countIntents()).toBe(1);
+  });
+
   it('runs begin, invalid retry, valid submit, and receipt through HTTP', async () => {
     const { app, cookie, session, store } = await setup();
     const before = store.read((tx) => tx.currentMember('tenant_1', 'subject_1'));

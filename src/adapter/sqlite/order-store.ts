@@ -565,6 +565,16 @@ export class SqliteOrderStore implements OrderStorage {
       );
   }
 
+  countIntents(): number {
+    const row = this.db.query('SELECT COUNT(*) AS count FROM form_intents').get() as { count: number };
+    return row.count;
+  }
+
+  countAudit(): number {
+    const row = this.db.query('SELECT COUNT(*) AS count FROM boundary_audit').get() as { count: number };
+    return row.count;
+  }
+
   setProductRevision(tenantId: string, productId: string, revision: number, priceMinor: number): void {
     this.db
       .query('UPDATE products SET revision = ?, price_minor = ? WHERE tenant_id = ? AND id = ?')
