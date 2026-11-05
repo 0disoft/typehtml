@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,6 +35,66 @@ async function databasePath(): Promise<string> {
 }
 
 describe('SQLite sessions and credentials', () => {
+  it.each([
+    ['sessions', SqliteSessionStore],
+    ['credentials', SqliteCredentialStore],
+  ] as const)('closes unowned %s connections when startup is blocked by another connection', async (_name, Store) => {
+    const filename = await databasePath();
+    const blocker = new Database(filename, { strict: true });
+    const opened: Database[] = [];
+    let healthy: SqliteSessionStore | SqliteCredentialStore | undefined;
+    const originalExec = Database.prototype.exec;
+    try {
+      blocker.exec('BEGIN EXCLUSIVE');
+      const observed = spyOn(Database.prototype, 'exec').mockImplementation(function (this: Database, sql: string) {
+        if (this !== blocker && !opened.includes(this)) opened.push(this);
+        return originalExec.call(this, sql);
+      });
+      try {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          expect(() => new Store(filename)).toThrow('database is locked');
+        }
+      } finally { observed.mockRestore(); }
+      blocker.exec('ROLLBACK');
+      expect(opened).toHaveLength(2);
+      for (const connection of opened) expect(() => connection.query('SELECT 1').get()).toThrow('closed');
+      healthy = new Store(filename);
+      if (healthy instanceof SqliteSessionStore) {
+        const session = healthy.create(principal);
+        expect(healthy.get(session.id)?.csrfToken).toBe(session.csrfToken);
+      } else {
+        await healthy.seed('tenant_1', 'subject_1', 'correct horse');
+        expect((await healthy.verify('tenant_1', 'subject_1', 'correct horse'))?.subjectId).toBe('subject_1');
+      }
+    } finally {
+      healthy?.close();
+      for (const connection of opened) connection.close(true);
+      if (blocker.inTransaction) blocker.exec('ROLLBACK');
+      blocker.close();
+    }
+  }, 10_000);
+
+  it('closes the session connection after schema initialization fails', async () => {
+    const filename = await databasePath();
+    const schema = new Database(filename, { strict: true });
+    try { schema.exec('CREATE TABLE auth_sessions (token_hash TEXT PRIMARY KEY)'); }
+    finally { schema.close(); }
+    const opened: Database[] = [];
+    const originalExec = Database.prototype.exec;
+    const observed = spyOn(Database.prototype, 'exec').mockImplementation(function (this: Database, sql: string) {
+      if (!opened.includes(this)) opened.push(this);
+      return originalExec.call(this, sql);
+    });
+    try {
+      expect(() => new SqliteSessionStore(filename)).toThrow('no such column');
+      expect(opened).toHaveLength(1);
+      expect(() => opened[0]!.query('SELECT 1').get()).toThrow('closed');
+    } finally {
+      observed.mockRestore();
+      for (const connection of opened) connection.close(true);
+    }
+  });
+
   it('rolls back session rotation if issuing the replacement fails', async () => {
     const sessions = new SqliteSessionStore(await databasePath());
     const original = sessions.create(principal);

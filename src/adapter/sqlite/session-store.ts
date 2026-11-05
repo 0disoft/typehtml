@@ -19,6 +19,19 @@ function token(prefix: string): string {
   return prefix + randomBytes(32).toString('base64url');
 }
 
+/** Transfer connection ownership only after all authentication-store setup succeeds. */
+function openAuthDatabase(filename: string, initialize: (db: Database) => void): Database {
+  const db = new Database(filename, { strict: true });
+  let initialized = false;
+  try {
+    initialize(db);
+    initialized = true;
+    return db;
+  } finally {
+    if (!initialized) db.close(true);
+  }
+}
+
 export type SqliteSessionStoreOptions = Readonly<{
   ttlSeconds?: number;
   now?: () => number;
@@ -33,11 +46,11 @@ export class SqliteSessionStore implements SessionStore {
     this.ttlSeconds = options.ttlSeconds ?? 8 * 60 * 60;
     if (!Number.isSafeInteger(this.ttlSeconds) || this.ttlSeconds < 1) throw new Error('INVALID_SESSION_TTL');
     this.now = options.now ?? Date.now;
-    this.db = new Database(filename, { strict: true });
-    this.db.exec('PRAGMA foreign_keys = ON');
-    this.db.exec('PRAGMA busy_timeout = 1000');
-    if (filename !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL');
-    this.db.exec(`
+    this.db = openAuthDatabase(filename, (db) => {
+      db.exec('PRAGMA foreign_keys = ON');
+      db.exec('PRAGMA busy_timeout = 1000');
+      if (filename !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+      db.exec(`
       CREATE TABLE IF NOT EXISTS auth_sessions (
         token_hash TEXT PRIMARY KEY,
         subject_id TEXT NOT NULL,
@@ -47,7 +60,8 @@ export class SqliteSessionStore implements SessionStore {
         expires_at INTEGER NOT NULL
       ) STRICT;
       CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at);
-    `);
+      `);
+    });
   }
 
   get(id: string): Session | null {
@@ -102,10 +116,10 @@ export class SqliteCredentialStore implements CredentialStore {
   private readonly db: Database;
 
   constructor(filename: string) {
-    this.db = new Database(filename, { strict: true });
-    this.db.exec('PRAGMA busy_timeout = 1000');
-    if (filename !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL');
-    this.db.exec(`
+    this.db = openAuthDatabase(filename, (db) => {
+      db.exec('PRAGMA busy_timeout = 1000');
+      if (filename !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+      db.exec(`
       CREATE TABLE IF NOT EXISTS auth_credentials (
         tenant_id TEXT NOT NULL,
         subject_id TEXT NOT NULL,
@@ -113,7 +127,8 @@ export class SqliteCredentialStore implements CredentialStore {
         active INTEGER NOT NULL CHECK (active IN (0, 1)),
         PRIMARY KEY (tenant_id, subject_id)
       ) STRICT;
-    `);
+      `);
+    });
   }
 
   async seed(tenantId: string, subjectId: string, password: string, active = true): Promise<void> {
