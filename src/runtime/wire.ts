@@ -190,15 +190,12 @@ async function readBoundedBody(request: Request, options: FormReadLimits, runtim
     if (remaining() <= 0) throw new WireError(408, 'BODY_READ_TIMEOUT');
     return new Uint8Array(0);
   }
-  const chunks: Uint8Array[] = [];
+  let body = new Uint8Array(0);
   let total = 0;
-  let rejectStop!: (error: unknown) => void;
-  const stopped = new Promise<never>((_, reject) => { rejectStop = reject; });
-  // Setup can fail before the first race has subscribed to this promise.
-  void stopped.catch(() => undefined);
+  let rejectRead: ((error: unknown) => void) | undefined;
   let stoppedError: { error: unknown } | undefined;
   const stop = (error: unknown) => {
-    if (stoppedError === undefined) { stoppedError = { error }; rejectStop(error); }
+    if (stoppedError === undefined) { stoppedError = { error }; rejectRead?.(error); }
   };
   const abort = () => stop(new WireError(400, 'BODY_READ_ABORTED'));
   const assertActive = () => {
@@ -224,18 +221,32 @@ async function readBoundedBody(request: Request, options: FormReadLimits, runtim
       assertActive();
       let reading: ReturnType<FormBodyReader['read']>;
       try { reading = reader.read(); } catch { throw new WireError(400, 'BODY_READ_FAILED'); }
-      const { done, value } = await Promise.race([
-        reading.catch(() => { throw new WireError(400, 'BODY_READ_FAILED'); }), stopped,
-      ]);
-      // A ready read can win the race even after cancellation or a delayed timer.
+      let result: Awaited<ReturnType<FormBodyReader['read']>>;
+      try {
+        // Keep only the current read's cancellation callback.
+        result = await new Promise<Awaited<ReturnType<FormBodyReader['read']>>>((resolve, reject) => {
+          rejectRead = reject;
+          reading.then(resolve, () => reject(new WireError(400, 'BODY_READ_FAILED')));
+          if (stoppedError !== undefined) reject(stoppedError.error);
+        });
+      } finally { rejectRead = undefined; }
+      // Check cancellation and deadlines even when the read was already fulfilled.
       assertActive();
+      const { done, value } = result;
       if (done) break;
-      if (value === undefined) continue;
-      total += value.byteLength;
-      if (total > options.maxBytes) {
+      if (value === undefined || value.byteLength === 0) continue;
+      const nextTotal = total + value.byteLength;
+      if (nextTotal > options.maxBytes) {
         throw new WireError(413, 'BODY_TOO_LARGE');
       }
-      chunks.push(value);
+      if (nextTotal > body.byteLength) {
+        const expanded = new Uint8Array(Math.min(options.maxBytes, Math.max(nextTotal, body.byteLength * 2)));
+        expanded.set(body.subarray(0, total));
+        body = expanded;
+      }
+      // Copy now: a transport may reuse its buffer on the next read.
+      body.set(value, total);
+      total = nextTotal;
     }
   } catch (error) {
     try { void reader.cancel().catch(() => undefined); } catch { /* Preserve the read failure. */ }
@@ -245,13 +256,7 @@ async function readBoundedBody(request: Request, options: FormReadLimits, runtim
     for (const signal of signals) signal.removeEventListener('abort', abort);
     try { reader.releaseLock(); } catch { /* Preserve the result if the transport already failed. */ }
   }
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
+  return body.subarray(0, total);
 }
 
 /** Shared bounded transport parser; route-specific allowlists and protocol checks follow. */

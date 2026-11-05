@@ -155,6 +155,53 @@ function bodyRequest(signal?: AbortSignal): Request {
 }
 
 describe('bounded body deadlines and I/O', () => {
+  test('copies each consumed chunk before the transport reuses its backing buffer', async () => {
+    const io = transport();
+    const shared = new Uint8Array(4);
+    const chunks = ['a=1&', 'b=2&'];
+    io.reader.read = async () => {
+      const chunk = chunks.shift();
+      if (chunk === undefined) {
+        shared.fill(33);
+        return { done: true };
+      }
+      shared.set(new TextEncoder().encode(chunk));
+      return { done: false, value: shared };
+    };
+    await expect(readUrlEncodedEntries(bodyRequest(), { ...http, maxBytes: 8 }, io.runtime))
+      .resolves.toEqual([{ key: 'a', value: '1' }, { key: 'b', value: '2' }]);
+    expect(io.state.cancelled).toBe(0);
+    expect(io.state.released).toBe(1);
+    expect(io.timers.size).toBe(0);
+  });
+
+  test('cancels one pending body without cancelling another concurrent request', async () => {
+    const first = transport();
+    const second = transport();
+    const controller = new AbortController();
+    let finishSecond!: (result: Awaited<ReturnType<FormBodyReader['read']>>) => void;
+    first.reader.read = () => new Promise(() => {});
+    second.reader.read = () => {
+      second.reader.read = async () => ({ done: true });
+      return new Promise((resolve) => { finishSecond = resolve; });
+    };
+    const stopped = readUrlEncodedEntries(bodyRequest(controller.signal), http, first.runtime);
+    const running = readUrlEncodedEntries(bodyRequest(), http, second.runtime);
+    controller.abort();
+    await expect(stopped).rejects.toMatchObject({ code: 'BODY_READ_ABORTED' });
+    expect(first.state.cancelled).toBe(1);
+    expect(first.state.released).toBe(1);
+    expect(first.timers.size).toBe(0);
+    expect(second.state.cancelled).toBe(0);
+    expect(second.state.released).toBe(0);
+    expect(second.timers.size).toBe(1);
+    finishSecond({ done: false, value: new TextEncoder().encode('x=2') });
+    await expect(running).resolves.toEqual([{ key: 'x', value: '2' }]);
+    expect(second.state.cancelled).toBe(0);
+    expect(second.state.released).toBe(1);
+    expect(second.timers.size).toBe(0);
+  });
+
   test.each([99, 100, 101])('completion at %dms respects an exclusive 100ms deadline even before its timer fires', async (completedAt) => {
     const io = transport();
     const read = io.reader.read.bind(io.reader);
