@@ -368,6 +368,11 @@ function checkConstraints(
         ...diagnosticError('BC013', 'known-constraint-witness', `${binding.actionId}/${name}/${limit.kind}-witness`, `${limit.kind}-witness`, `native ${control.type} control permits ${limit.candidate}, which the selected contract rejects`, control.location, binding.constraintMismatchSeverity),
         witness: {
           rawValue: String(limit.candidate), codecValue: limit.candidate,
+          codec: 'decimal-integer',
+          schemaPointer: `/input/schema/properties/${name.replace(/~/g, '~0').replace(/\//g, '~1')}/${limit.kind === 'max' ? 'maximum' : 'minimum'}`,
+          source: check.source,
+          synthetic: true,
+          nativeValidation: 'enabled-for-selected-activation',
           ...(limit.kind === 'max' ? { hypotheticalServerMaximum: limit.server } : { hypotheticalServerMinimum: limit.server }),
           ...(limit.kind === 'max' && limit.html !== null ? { unchangedHtmlMaximum: limit.html } : {}),
         },
@@ -546,7 +551,7 @@ async function analyzeLoaded(loaded: LoadedDoctorConfig): Promise<DoctorReport> 
         const collection = collectFormEntries(form, submitter);
         submissions.push({
           artifact: { path: document.path, sha256: artifactHash, sourceKind: document.sourceKind },
-          intendedAction: check.action, formId: binding.formId, formLocation: form.location,
+          intendedAction: check.action, projectionSource: check.source, formId: binding.formId, formLocation: form.location,
           context: { documentUrl: document.documentUrl, baseUrl: parsed.baseUrl, executionAssumption: document.executionAssumption, hasScript: parsed.hasScript },
           activation, submitterLocation: submitter?.location ?? null,
           rawAction: attribute(form.element, 'action'), rawSubmitterAction: submitter ? attribute(submitter.element, 'formaction') : null,

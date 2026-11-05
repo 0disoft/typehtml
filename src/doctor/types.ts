@@ -36,6 +36,11 @@ export interface Diagnostic {
   readonly witness?: {
     readonly rawValue: string;
     readonly codecValue: string | number;
+    readonly codec: 'decimal-integer';
+    readonly schemaPointer: string;
+    readonly source: FormCheck['source'];
+    readonly synthetic: true;
+    readonly nativeValidation: 'enabled-for-selected-activation';
     readonly hypotheticalServerMinimum?: number;
     readonly hypotheticalServerMaximum?: number;
     readonly unchangedHtmlMaximum?: number;
@@ -55,6 +60,7 @@ export interface CoverageRow {
 export interface SubmissionFact {
   readonly artifact: { readonly path: string; readonly sha256: string; readonly sourceKind: string };
   readonly intendedAction: FormCheck['action'];
+  readonly projectionSource: FormCheck['source'];
   readonly formId: string;
   readonly formLocation: SourceLocation;
   readonly context: { readonly documentUrl: string; readonly baseUrl: string; readonly executionAssumption: string; readonly hasScript: boolean };

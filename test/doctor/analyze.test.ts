@@ -133,6 +133,11 @@ describe('Doctor form-link analysis', () => {
     expect(witnesses[0]?.witness).toEqual({
       rawValue: '11',
       codecValue: 11,
+      codec: 'decimal-integer',
+      schemaPointer: '/input/schema/properties/quantity/maximum',
+      source: report.submissions[0]!.projectionSource,
+      synthetic: true,
+      nativeValidation: 'enabled-for-selected-activation',
       hypotheticalServerMaximum: 10,
       unchangedHtmlMaximum: 20,
     });
@@ -210,6 +215,9 @@ describe('Doctor form-link analysis', () => {
     expect(report.submissions).toHaveLength(2);
     expect(report.submissions[0]?.artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(report.submissions[0]?.intendedAction.path).toBe('/submit');
+    expect(report.submissions[0]?.projectionSource.path).toBe('contract.json');
+    expect(report.submissions[0]?.projectionSource.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(report.submissions[0]?.projectionSource.behaviorSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(report.submissions[1]?.effectiveTarget?.encoding).toBe('multipart/form-data');
     expect(report.coverage.filter((row) => row.ruleGroup === 'target').map((row) => row.actualStatus)).toEqual(['checked', 'unsupported']);
   });
@@ -274,6 +282,7 @@ describe('Doctor form-link analysis', () => {
     const report = await runDoctor(config);
     expect(report.exitCode).toBe(0);
     expect(report.findings.find((finding) => finding.ruleId === 'BC013')?.witness?.rawValue).toBe('11');
+    expect(report.findings.find((finding) => finding.ruleId === 'BC013')?.witness?.schemaPointer).toBe('/input/schema/properties/quantity/maximum');
   });
 
   test('treats fragment as warning and empty formaction as document URL despite a base', async () => {
