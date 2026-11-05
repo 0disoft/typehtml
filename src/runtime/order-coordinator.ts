@@ -32,9 +32,9 @@ export class OrderFailure extends Error {
   constructor(
     status: OrderFailure['status'],
     code: string,
-    options: Readonly<{ retryAfterSeconds?: number; formState?: FormState }> = {},
+    options: Readonly<{ retryAfterSeconds?: number; formState?: FormState; cause?: unknown }> = {},
   ) {
-    super(code);
+    super(code, options);
     this.name = 'OrderFailure';
     this.status = status;
     this.code = code;
@@ -123,7 +123,7 @@ export class OrderCoordinator {
       });
     } catch (error) {
       if (isCommitError(error)) {
-        this.recoverCommit((tx) => {
+        this.recoverCommit(error, (tx) => {
           const decision = decideIntent(this.snapshotFrom(tx, principal, intentId), { kind: 'view' }, this.clock(), this.behaviorSha256);
           if (decision.kind === 'form') return true;
           if (decision.kind === 'error' && decision.code !== 'INTENT_UNAVAILABLE') {
@@ -263,7 +263,7 @@ export class OrderCoordinator {
       return { kind: 'receipt', location };
     } catch (error) {
       if (!isCommitError(error)) throw mapBusy(error);
-      return { kind: 'receipt', location: this.recoverWriteLocation(candidate) };
+      return { kind: 'receipt', location: this.recoverWriteLocation(candidate, error) };
     }
   }
 
@@ -324,9 +324,9 @@ export class OrderCoordinator {
     }
   }
 
-  private recoverWriteLocation(candidate: WriteCandidate): string {
+  private recoverWriteLocation(candidate: WriteCandidate, commitError: unknown): string {
     const { principal, intentId, validation } = candidate;
-    return this.recoverCommit((tx) => {
+    return this.recoverCommit(commitError, (tx) => {
       const decision = decideIntent(this.snapshotFrom(tx, principal, intentId), this.submission(validation), this.clock(), this.behaviorSha256);
       if (decision.kind === 'receipt') {
         this.receiptView(tx, principal, decision.orderId);
@@ -341,14 +341,16 @@ export class OrderCoordinator {
     return this.storage.read((tx) => this.snapshotFrom(tx, principal, intentId));
   }
 
-  private recoverCommit<T>(work: (tx: OrderReadTx) => T | null): T {
+  private recoverCommit<T>(commitError: unknown, work: (tx: OrderReadTx) => T | null): T {
+    let cause = commitError;
     try {
       const recovered = this.storage.recoverRead?.(work);
       if (recovered !== undefined && recovered !== null) return recovered;
     } catch (error) {
       if (error instanceof OrderFailure) throw error;
+      cause = new AggregateError([commitError, error], 'Commit acknowledgement and recovery both failed');
     }
-    throw new OrderFailure(503, 'COMMIT_UNCERTAIN', { retryAfterSeconds: TRANSIENT_RETRY_AFTER_SECONDS });
+    throw new OrderFailure(503, 'COMMIT_UNCERTAIN', { retryAfterSeconds: TRANSIENT_RETRY_AFTER_SECONDS, cause });
   }
 
   private snapshotFrom(tx: OrderReadTx, principal: Principal, intentId: string): CoordinatorSnapshot | null {

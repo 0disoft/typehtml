@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { resolve } from 'node:path';
 import { loadBoundaryContract } from '../../src/contract/load.ts';
-import { SqliteOrderStore } from '../../src/adapter/sqlite/order-store.ts';
+import { SqliteOrderStore, StoreCommitError } from '../../src/adapter/sqlite/order-store.ts';
 import { createOrderBindings, type OrderBindings } from '../../src/runtime/order-bindings.ts';
 import { OrderCoordinator, OrderFailure } from '../../src/runtime/order-coordinator.ts';
 import type { Principal, Product } from '../../src/runtime/order.ts';
@@ -46,6 +46,88 @@ async function beginAndSubmit(coordinator: OrderCoordinator) {
   });
   return { begin, receipt };
 }
+
+describe('commit recovery error provenance', () => {
+  for (const phase of ['begin', 'submit'] as const) {
+    it.each(['unsupported', 'unconfirmed'] as const)(`preserves the original ${phase} failure when recovery is %s`, async (recovery) => {
+      const { store, coordinator, loaded } = await setup();
+      try {
+        const begin = phase === 'submit' ? await coordinator.beginDraft(principal, 'p_100') : null;
+        const original = new StoreCommitError('SQLITE_COMMIT_FAILED', { cause: new Error('disk I/O failure') });
+        let writes = 0;
+        const storage: OrderStorage = {
+          read: (work) => store.read(work),
+          immediate: async () => { writes++; throw original; },
+          ...(recovery === 'unconfirmed' ? { recoverRead: store.read.bind(store) } : {}),
+        };
+        const candidate = new OrderCoordinator({ loaded, storage, bindings: createOrderBindings(), now: () => 1_000_000 });
+        const operation = begin === null ? candidate.beginDraft(principal, 'p_100')
+          : candidate.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' });
+        let failed: unknown;
+        try { await operation; } catch (error) { failed = error; }
+        expect(failed).toBeInstanceOf(OrderFailure);
+        expect(failed).toMatchObject({ status: 503, code: 'COMMIT_UNCERTAIN', retryAfterSeconds: 1 });
+        expect((failed as Error).cause).toBe(original);
+        expect(writes).toBe(1);
+        expect(store.countAudit()).toBe(0);
+      } finally { store.close(); }
+    });
+
+    it(`retains both ${phase} errors after a committed write without executing it again`, async () => {
+      const { store, coordinator, loaded } = await setup();
+      try {
+        const begin = phase === 'submit' ? await coordinator.beginDraft(principal, 'p_100') : null;
+        const disk = new Error('commit acknowledgement I/O failure');
+        const original = new StoreCommitError('SQLITE_COMMIT_FAILED', { cause: disk });
+        const recovery = Object.assign(new Error('database unavailable during confirmation'), { code: 'SQLITE_CANTOPEN' });
+        let writes = 0;
+        let reads = 0;
+        let executions = 0;
+        const base = createOrderBindings();
+        const storage: OrderStorage = {
+          read: (work) => store.read(work),
+          immediate: async (work) => { writes++; await store.immediate(work); throw original; },
+          recoverRead: () => { reads++; throw recovery; },
+        };
+        const candidate = new OrderCoordinator({ loaded, storage, now: () => 1_000_000,
+          bindings: { ...base, execute: (context) => { executions++; return base.execute(context); } },
+        });
+        const operation = begin === null ? candidate.beginDraft(principal, 'p_100')
+          : candidate.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' });
+        let failed: unknown;
+        try { await operation; } catch (error) { failed = error; }
+        expect(failed).toMatchObject({ status: 503, code: 'COMMIT_UNCERTAIN', retryAfterSeconds: 1 });
+        const cause = (failed as Error).cause;
+        expect(cause).toBeInstanceOf(AggregateError);
+        expect((cause as AggregateError).errors).toEqual([original, recovery]);
+        expect((cause as AggregateError).errors[0]).toBe(original);
+        expect(original.cause).toBe(disk);
+        expect(writes).toBe(1);
+        expect(reads).toBe(1);
+        expect(executions).toBe(phase === 'submit' ? 1 : 0);
+        expect(store.countIntents()).toBe(1);
+        expect(store.countAudit()).toBe(phase === 'submit' ? 1 : 0);
+      } finally { store.close(); }
+    });
+
+    it(`preserves an intentional ${phase} recovery domain error unchanged`, async () => {
+      const { store, coordinator, loaded } = await setup();
+      try {
+        const begin = phase === 'submit' ? await coordinator.beginDraft(principal, 'p_100') : null;
+        const domain = new OrderFailure(404, 'NOT_FOUND');
+        const storage: OrderStorage = {
+          read: (work) => store.read(work),
+          immediate: async () => { throw new StoreCommitError('SQLITE_COMMIT_FAILED'); },
+          recoverRead: () => { throw domain; },
+        };
+        const candidate = new OrderCoordinator({ loaded, storage, bindings: createOrderBindings(), now: () => 1_000_000 });
+        const operation = begin === null ? candidate.beginDraft(principal, 'p_100')
+          : candidate.submitIntent(principal, begin.intentId, { productId: 'p_100', quantity: '2' });
+        await expect(operation).rejects.toBe(domain);
+      } finally { store.close(); }
+    });
+  }
+});
 
 describe('order coordinator and SQLite adapter', () => {
   it('runs start, begin, invalid retry, valid submit, and replay', async () => {
