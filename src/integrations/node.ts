@@ -99,14 +99,43 @@ function applyResponseHeaders(response: Response, outgoing: ServerResponse): voi
   if (cookies.length > 0) outgoing.setHeader('Set-Cookie', cookies);
 }
 
-function awaitWithAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+function awaitWithAbort<T>(pending: Promise<T>, signal: AbortSignal, discard?: (value: T) => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const abort = () => { signal.removeEventListener('abort', abort); reject(signal.reason); };
+    let settled = false;
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      reject(signal.reason);
+    };
     signal.addEventListener('abort', abort, { once: true });
-    pending.then((value) => { signal.removeEventListener('abort', abort); resolve(value); },
-      (error: unknown) => { signal.removeEventListener('abort', abort); reject(error); });
+    pending.then((value) => {
+      signal.removeEventListener('abort', abort);
+      if (settled) {
+        try { discard?.(value); } catch { /* A late value cannot replace the original cancellation. */ }
+        return;
+      }
+      settled = true;
+      resolve(value);
+    }, (error: unknown) => {
+      signal.removeEventListener('abort', abort);
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
     if (signal.aborted) abort();
   });
+}
+
+function discardResponse(response: Response, reason?: unknown): void {
+  if (!(response instanceof Response) || response.body === null || response.body.locked) return;
+  // An abandoned handler may return long after its request/socket listeners were disposed.
+  try { void response.body.cancel(reason).catch(() => undefined); } catch { /* Preserve the transport outcome. */ }
+}
+
+function awaitHandlerResponse(pending: Response | Promise<Response>, signal: AbortSignal): Promise<Response> {
+  // Keep late-result ownership outside the listener's socket/request closure.
+  return awaitWithAbort(Promise.resolve(pending), signal, (response) => discardResponse(response, signal.reason));
 }
 
 /** Own stream completion so an aborted source cannot be mistaken for a successful empty response. */
@@ -174,7 +203,8 @@ export function toNodeListener(
       }
       if (hasBody) input = incomingBody(incoming);
       const init = { method, headers: rawHeaders(incoming), signal: abort.signal, body: input?.body, duplex: 'half' };
-      response = await handler(new Request(url, init));
+      abort.signal.throwIfAborted();
+      response = await awaitHandlerResponse(handler(new Request(url, init)), abort.signal);
       if (!(response instanceof Response)) throw new TypeError('form handler must return a Response');
       if (abort.signal.aborted || outgoing.destroyed) return;
       applyResponseHeaders(response, outgoing);
@@ -201,9 +231,7 @@ export function toNodeListener(
     } finally {
       if (timer !== undefined) clearTimeout(timer);
       input?.dispose();
-      if (response?.body !== null && response?.body !== undefined && !response.body.locked) {
-        try { void response.body.cancel().catch(() => undefined); } catch { /* Preserve transport failures. */ }
-      }
+      if (response !== undefined) discardResponse(response, abort.signal.reason);
       incoming.off('aborted', disconnected);
       incoming.off('error', failed);
       outgoing.off('close', disconnected);

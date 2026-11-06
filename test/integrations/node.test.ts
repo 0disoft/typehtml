@@ -126,6 +126,63 @@ describe('raw Node framework adapters', () => {
     });
   });
 
+  it('disposes request and socket listeners on disconnect even when the host handler never settles', async () => {
+    let seen!: Request;
+    let incoming!: IncomingMessage; let outgoing!: ServerResponse;
+    let started!: () => void; const ready = new Promise<void>((resolve) => { started = resolve; });
+    let finish!: () => void; const completed = new Promise<void>((resolve) => { finish = resolve; });
+    const listener = toNodeListener((request) => {
+      seen = request; started();
+      return new Promise<Response>(() => {});
+    }, { origin: canonical });
+    await withServer((request, response) => {
+      incoming = request; outgoing = response;
+      void listener(request, response).finally(finish);
+    }, async (base) => {
+      const url = new URL(base);
+      const client = httpRequest({ hostname: url.hostname, port: url.port, path: '/never', method: 'POST', headers: { 'Content-Length': '999' } });
+      client.on('error', () => {}); client.write('partial');
+      await ready; client.destroy(); await completed;
+      expect(seen.signal.aborted).toBe(true);
+      expect(incoming.listenerCount('data')).toBe(0);
+      expect(incoming.listenerCount('end')).toBe(0);
+      expect(incoming.listenerCount('aborted')).toBe(0);
+      expect(incoming.listeners('error').some((handler) => handler.name === 'failed' || handler.name === 'error')).toBe(false);
+      expect(outgoing.listeners('close').some((handler) => handler.name === 'disconnected')).toBe(false);
+      expect(outgoing.listeners('error').some((handler) => handler.name === 'failed')).toBe(false);
+    });
+  });
+
+  it('cancels a late response body after the disconnected request has already finished cleanup', async () => {
+    let seen!: Request;
+    let started!: () => void; const ready = new Promise<void>((resolve) => { started = resolve; });
+    let finish!: () => void; const completed = new Promise<void>((resolve) => { finish = resolve; });
+    let resolveResponse!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { resolveResponse = resolve; });
+    const listener = toNodeListener((request) => { seen = request; started(); return pending; }, { origin: canonical });
+    await withServer((request, response) => { void listener(request, response).finally(finish); }, async (base) => {
+      const url = new URL(base);
+      const client = httpRequest({ hostname: url.hostname, port: url.port, path: '/late', method: 'POST', headers: { 'Content-Length': '999' } });
+      client.on('error', () => {}); client.write('partial');
+      await ready; client.destroy(); await completed;
+      let canceled!: (reason: unknown) => void; const cancellation = new Promise<unknown>((resolve) => { canceled = resolve; });
+      resolveResponse(new Response(new ReadableStream<Uint8Array>({
+        cancel(reason) { canceled(reason); return new Promise<void>(() => {}); },
+      })));
+      expect(await cancellation).toBe(seen.signal.reason);
+      expect(seen.signal.reason.name).toBe('AbortError');
+    });
+  });
+
+  it('preserves host handler rejection and reports the original error once', async () => {
+    const error = new Error('host handler failed'); const errors: unknown[] = [];
+    await withServer(toNodeListener(async () => { throw error; }, { origin: canonical, onError: (reason) => errors.push(reason) }), async (base) => {
+      const response = await fetch(base + '/error');
+      expect(response.status).toBe(500); expect(await response.text()).toBe('INTERNAL_ERROR');
+      expect(errors).toEqual([error]);
+    });
+  });
+
   it('waits for real socket backpressure without dropping or reordering response chunks', async () => {
     let waits = 0;
     const chunk = new Uint8Array(131_072).fill(65);
