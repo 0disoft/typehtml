@@ -184,3 +184,7 @@ Doctor analyzes selected native paths, not an entire application's protection. I
 The root entry point also exports `validateBusinessInput`, `validateOutputObject`, `OutputValidationError`, `csrfTokenMatches`, `assertCsrfToken`, and `CsrfError`, plus input/schema/projection types. Prefer the higher-level form handler unless your existing server already supplies the equivalent ordered boundary checks.
 
 The `contract`, `doctor`, and `runtime` entry points expose their named functions and types for advanced use. They do not implicitly import the SQLite reference. The original `boundary-contract/0.5-draft` format remains available for that reference profile; a normal generic form does not need to write its order-specific configuration.
+
+`loadBoundaryContract(path)` and `loadFormCheck(path)` return deeply frozen snapshots, including their raw JSON values, validated fields, arrays, and metadata. Use `structuredClone(loaded.value)` to prepare editable data, and reload the revised contract to obtain matching validation and hash metadata.
+
+In the Bun order reference, `createOrderApp` captures its origin list, authentication mode and credential-store reference, demo values, and ingress hook at creation. `OrderCoordinator` captures its binding methods. Create a new app or coordinator to replace those settings or hooks. Captured hooks keep their original receivers; store state and authorization facts remain live and are rechecked in the existing transaction phases.
