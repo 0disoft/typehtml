@@ -41,22 +41,25 @@ export type OrderAppOptions = Readonly<{
 
 type AppEnv = { Variables: { session: Session } };
 
+/** Capture app policy once; stateful stores and the ingress hook retain their original receivers. */
 export function createOrderApp(options: OrderAppOptions) {
-  const { loaded, coordinator, sessions } = options;
+  const { loaded, coordinator, sessions, credentials, requestLimit } = options;
+  const allowedOrigins = Object.freeze([...options.allowedOrigins]);
   const contract = loaded.contract;
-  const demo = options.demo ?? {
+  const configuredDemo = options.demo ?? {
     principal: { tenantId: 'tenant_1', subjectId: 'subject_1', sessionId: 'demo' },
     productId: 'p_100',
   };
+  const demo = Object.freeze({ ...configuredDemo, principal: Object.freeze({ ...configuredDemo.principal }) });
   const constraints = formConstraints(loaded);
   const rateLimiter = options.rateLimiter ?? new InMemoryActionRateLimiter();
-  const secureCookies = options.secureCookies ?? (options.allowedOrigins.length > 0 && options.allowedOrigins.every((origin) => new URL(origin).protocol === 'https:'));
+  const secureCookies = options.secureCookies ?? (allowedOrigins.length > 0 && allowedOrigins.every((origin) => new URL(origin).protocol === 'https:'));
   const app = new Hono<AppEnv>();
 
   app.use('*', async (c, next) => {
     try {
-      if (c.req.method === 'POST' && options.requestLimit !== undefined) {
-        assertRateLimit(await options.requestLimit(c.req.raw));
+      if (c.req.method === 'POST' && requestLimit !== undefined) {
+        assertRateLimit(await Reflect.apply(requestLimit, options, [c.req.raw]));
       }
       await next();
     } finally {
@@ -83,7 +86,7 @@ export function createOrderApp(options: OrderAppOptions) {
 
   app.get('/login', (c) => {
     assertAccept(c.req.raw);
-    if (options.credentials !== undefined) return html(c, 200, renderLogin());
+    if (credentials !== undefined) return html(c, 200, renderLogin());
     const session = sessions.create(demo.principal);
     const previous = sessionFromRequest(c.req.raw, sessions);
     if (previous !== null) sessions.revoke?.(previous.id);
@@ -94,8 +97,8 @@ export function createOrderApp(options: OrderAppOptions) {
   app.post('/login', async (c) => {
     assertAccept(c.req.raw);
     assertFormTransport(c.req.raw, contract.http.maxBytes);
-    assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
-    if (options.credentials === undefined) return html(c, 404, renderErrorPage(404, 'NOT_FOUND'));
+    assertRequestOrigin(c.req.raw, { allowedOrigins });
+    if (credentials === undefined) return html(c, 404, renderErrorPage(404, 'NOT_FOUND'));
     const entries = await readUrlEncodedEntries(c.req.raw, contract.http);
     if (entries.some((entry) => !['tenantId', 'subjectId', 'password'].includes(entry.key))) {
       throw new OrderFailure(400, 'UNKNOWN_FIELD');
@@ -107,7 +110,7 @@ export function createOrderApp(options: OrderAppOptions) {
     if (typeof tenantId !== 'string' || typeof subjectId !== 'string' || typeof password !== 'string') {
       return html(c, 400, renderLogin('아이디와 비밀번호를 입력해 주세요.'));
     }
-    const principal = await options.credentials.verify(tenantId, subjectId, password);
+    const principal = await credentials.verify(tenantId, subjectId, password);
     if (principal === null) return html(c, 401, renderLogin('아이디 또는 비밀번호가 올바르지 않습니다.'));
     const session = sessions.create(principal);
     const previous = sessionFromRequest(c.req.raw, sessions);
@@ -117,7 +120,7 @@ export function createOrderApp(options: OrderAppOptions) {
   });
 
   app.post('/logout', (c) => {
-    assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
+    assertRequestOrigin(c.req.raw, { allowedOrigins });
     const session = requireSession(c, sessions);
     sessions.revoke?.(session.id);
     c.header('Set-Cookie', clearSessionCookie(secureCookies));
@@ -178,7 +181,7 @@ export function createOrderApp(options: OrderAppOptions) {
   app.post(contract.page.intentInitialization.path, async (c) => {
     assertAccept(c.req.raw);
     assertFormTransport(c.req.raw, contract.http.maxBytes);
-    assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
+    assertRequestOrigin(c.req.raw, { allowedOrigins });
     const session = requireSession(c, sessions);
     const parsed = await readUrlEncodedForm(
       c.req.raw,
@@ -196,7 +199,7 @@ export function createOrderApp(options: OrderAppOptions) {
   app.post(contract.http.path, async (c) => {
     assertAccept(c.req.raw);
     assertFormTransport(c.req.raw, contract.http.maxBytes);
-    assertRequestOrigin(c.req.raw, { allowedOrigins: options.allowedOrigins });
+    assertRequestOrigin(c.req.raw, { allowedOrigins });
     const session = requireSession(c, sessions);
     const parsed = await readUrlEncodedForm(
       c.req.raw,
