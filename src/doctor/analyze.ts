@@ -22,6 +22,7 @@ import type {
 import { diagnosticError, diagnosticUnknown } from './types.ts';
 import { acceptsNativeInteger, nativeIntegerLimits, readNativeIntegerConstraints, selectNativeIntegerControl } from './constraints.ts';
 import type { NativeIntegerControl, NativeIntegerLimit } from './constraints.ts';
+import { indexEntries, type IndexedEntries } from './entries.ts';
 
 const MAX_REPORT_FINDINGS = 1000;
 const DOCTOR_EXIT = { success: 0, defect: 1, executionError: 2, incomplete: 3 } as const;
@@ -208,17 +209,16 @@ function checkSupply(
   collector: Collector,
   check: FormCheck,
   form: FormFact,
-  submitter: ControlFact | null,
+  collection: CollectionResult,
+  entriesByName: ReadonlyMap<string, IndexedEntries>,
   documentPath: string,
   binding: { formId: string; actionId: string },
   location: SourceLocation,
 ): SupplyResult {
-  const collection = collectFormEntries(form, submitter);
   const properties = new Set(Object.keys(check.input.schema.properties));
   const protocol = new Set(check.protocolFields);
   const allowed = new Set([...properties, ...protocol]);
   const required = new Set([...check.input.schema.required, ...check.protocolFields]);
-  const names = new Set(collection.entries.map((entry) => entry.name));
   let checked = collection.unsupportedControls.length === 0 && !form.hasDynamicControls;
   const causeBase = `${binding.actionId}/native`;
   for (const entry of collection.entries) {
@@ -244,7 +244,7 @@ function checkSupply(
           `${causeBase}/${name}/duplicate`,
           'duplicate-scalar',
           `native form can supply scalar ${noteForName(name)} more than once`,
-          fieldLocation(collection.entries.find((entry) => entry.name === name)?.control),
+          fieldLocation(entriesByName.get(name)?.first.control),
         ),
       );
     }
@@ -263,7 +263,7 @@ function checkSupply(
     );
   }
   for (const name of required) {
-    if (names.has(name)) continue;
+    if (entriesByName.has(name)) continue;
     if (collection.unsupportedNames.has(name) || form.hasDynamicControls) {
       checked = false;
       collector.add(
@@ -273,7 +273,7 @@ function checkSupply(
           `${causeBase}/${name}/supply-unknown`,
           'required-supply-unknown',
           `required field ${noteForName(name)} may be supplied by an unsupported control`,
-          fieldLocation(collection.entries.find((entry) => entry.name === name)?.control),
+          fieldLocation(entriesByName.get(name)?.first.control),
         ),
       );
       continue;
@@ -314,7 +314,7 @@ function checkSupply(
 function checkConstraints(
   collector: Collector,
   check: FormCheck,
-  collection: ReturnType<typeof collectFormEntries>,
+  entriesByName: ReadonlyMap<string, IndexedEntries>,
   documentPath: string,
   binding: { formId: string; actionId: string; constraintMismatchSeverity: Severity },
   skipValidation: boolean,
@@ -322,7 +322,7 @@ function checkConstraints(
   let compared = false;
   let incomplete = false;
   for (const [name, schema] of Object.entries(check.input.schema.properties)) {
-    const entry = collection.entries.find((candidate) => candidate.name === name);
+    const entry = entriesByName.get(name)?.first;
     if (!entry) continue;
     const native = selectNativeIntegerControl(schema, entry.control, skipValidation);
     if (native === null) { incomplete = true; continue; }
@@ -556,7 +556,8 @@ function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: Co
   const location = submitter?.location ?? form.location;
   const resolved = resolveEffectiveTarget(form, submitter);
   const collection = collectFormEntries(form, submitter);
-  submissions.push(submissionFact(bound, submitter, activation, resolved, collection));
+  const entriesByName = indexEntries(collection.entries);
+  submissions.push(submissionFact(bound, submitter, activation, resolved, collection, entriesByName));
   if (resolved.target === null) {
     recordUnsupportedTarget(collector, bound, location, resolved);
     return;
@@ -573,13 +574,14 @@ function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: Co
     collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'target', actualStatus: 'unsupported', evidenceRef: location, note: resolved.problem.message });
     return;
   }
-  const supply = checkSupply(collector, check, form, submitter, document.path, binding, location);
-  checkConstraints(collector, check, supply.entries, document.path, binding, resolved.target.skipValidation);
+  checkSupply(collector, check, form, collection, entriesByName, document.path, binding, location);
+  checkConstraints(collector, check, entriesByName, document.path, binding, resolved.target.skipValidation);
 }
 
 /** New provenance records keep parsed controls and configured bindings unchanged. */
 function submissionFact(
   bound: BoundForm, submitter: ControlFact | null, activation: string, resolved: TargetResult, collection: CollectionResult,
+  entriesByName: ReadonlyMap<string, IndexedEntries>,
 ): SubmissionFact {
   const { snapshot: { document, parsed, artifactHash }, binding, form, check } = bound;
   return {
@@ -589,7 +591,7 @@ function submissionFact(
     activation, submitterLocation: submitter?.location ?? null,
     rawAction: attribute(form.element, 'action'), rawSubmitterAction: submitter ? attribute(submitter.element, 'formaction') : null,
     effectiveTarget: resolved.target ? { url: resolved.target.url.href, method: resolved.target.method, encoding: resolved.target.encoding, skipValidation: resolved.target.skipValidation } : null,
-    fields: [...collection.possibleCounts].map(([name, possibleCount]) => ({ name, possibleCount, locations: collection.entries.filter((entry) => entry.name === name).map((entry) => entry.control.location) })),
+    fields: [...collection.possibleCounts].map(([name, possibleCount]) => ({ name, possibleCount, locations: entriesByName.get(name)!.locations })),
   };
 }
 
