@@ -45,3 +45,22 @@ test('optional request keys support authorized replay and preserve original reje
   expect(executions).toBe(1);
 });
 
+test('declared request keys survive a localized 422 and cannot be disabled by a handler', async () => {
+  const keyed = defineForm({ ...form.definition, protocol: { requestKey: 'required' }, input: { ...form.input.schema, properties: { x: { type: 'string', minLength: 1 } } } });
+  const key = createIdempotencyKey();
+  const handle = createFormHandler(keyed, { ...base, errors: { locale: 'ko', title: '입력 확인', messages: { MIN_LENGTH: '한 글자 이상 입력해 주세요' } } });
+  const submit = (requestKey?: string) => new Request('https://app.test/form', { method: 'POST', headers: { origin: 'https://app.test', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ _bc_csrf: 'fresh-redraw-token', x: '', ...(requestKey === undefined ? {} : { _bc_request: requestKey }) }) });
+  expect((await handle(submit())).status).toBe(400);
+  expect((await handle(submit('short'))).status).toBe(400);
+  const response = await handle(submit(key)); const body = await response.text();
+  expect(response.status).toBe(422); expect(body).toContain(`name="_bc_request" value="${key}"`);
+  expect(body).toContain('lang="ko"'); expect(body).toContain('한 글자 이상');
+  expect(() => createFormHandler(keyed, { ...base, acceptRequestKey: false })).toThrow('cannot disable');
+});
+
+test('stalled optional rate-limit hooks return a bounded503 rather than hanging', async () => {
+  const handle = createFormHandler(form, { ...base, rateLimit: () => new Promise(() => {}), rateLimitTimeoutMs: 3 });
+  const response = await handle(request());
+  expect(response.status).toBe(503); expect(await response.text()).toContain('RATE_LIMIT_UNAVAILABLE');
+});
+

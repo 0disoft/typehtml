@@ -4,7 +4,7 @@ import { acceptsHtml, assertRequestOrigin, prepareOriginPolicy, NegotiationError
 import { assertFormTransport, WireError, type FormReadLimits } from '../runtime/wire.ts';
 import { renderFailure } from './html.ts';
 import { IdempotencyError } from './idempotency.ts';
-import { RateLimitError } from './security.ts';
+import { consumeRateLimit, RateLimitError, RateLimitUnavailableError } from './security.ts';
 
 type MaybePromise<T> = T | Promise<T>;
 export type RawFormValues = Readonly<Record<string, string | readonly string[]>>;
@@ -26,6 +26,7 @@ export interface BoundaryHooks<Input, Output, Principal extends object, Result, 
   readonly allowedOrigins: readonly string[];
   /** Require one _bc_request field and expose it to execute; no store is selected implicitly. */
   readonly acceptRequestKey?: boolean;
+  readonly rateLimitTimeoutMs?: number;
   readonly authenticate: (request: Request) => MaybePromise<Principal | null>;
   readonly csrfToken: (context: Readonly<{ request: Request; principal: Readonly<Principal> }>) => MaybePromise<string>;
   /** Omit to retain synchronizer-token comparison; provide to verify signed tokens. */
@@ -85,6 +86,8 @@ export function createBoundaryHandler<Input, Output, Principal extends object, R
     project: options.project, success: options.success, invalid: options.invalid, onError: options.onError,
   });
   const originPolicy = prepareOriginPolicy({ allowedOrigins: origins });
+  const rateLimitTimeoutMs = options.rateLimitTimeoutMs ?? 30_000;
+  if (!Number.isSafeInteger(rateLimitTimeoutMs) || rateLimitTimeoutMs < 1 || rateLimitTimeoutMs > 2_147_483_647) throw new TypeError('invalid rate limit timeout');
   return async (request) => {
     try {
       const url = new URL(request.url);
@@ -99,7 +102,8 @@ export function createBoundaryHandler<Input, Output, Principal extends object, R
       if (typeof authenticated !== 'object' || Array.isArray(authenticated)) throw new TypeError('authenticate must return a principal object or null');
       const principal = Object.freeze({ ...authenticated });
       if (hooks.rateLimit !== undefined) {
-        const decision = await invoke(hooks.rateLimit, options, [{ request, principal }]);
+        const rateLimit = hooks.rateLimit;
+        const decision = await consumeRateLimit({ consume: () => invoke(rateLimit, options, [{ request, principal }]) }, boundary.path, { signal: request.signal, timeoutMs: rateLimitTimeoutMs });
         if (decision.allow !== true) {
           if (!Number.isSafeInteger(decision.retryAfterSeconds) || decision.retryAfterSeconds < 1) throw new TypeError('invalid retry delay');
           return failure(429, 'RATE_LIMITED', { 'Retry-After': String(decision.retryAfterSeconds) });
@@ -127,7 +131,7 @@ export function createBoundaryHandler<Input, Output, Principal extends object, R
       return html(303, '', { Location: successLocation(success, url.origin) });
     } catch (error) {
       if (error instanceof RateLimitError) return failure(429, error.code, { 'Retry-After': String(error.retryAfterSeconds) });
-      if (error instanceof WireError || error instanceof NegotiationError || error instanceof CsrfError || error instanceof FormHttpError || error instanceof IdempotencyError) {
+      if (error instanceof WireError || error instanceof NegotiationError || error instanceof CsrfError || error instanceof FormHttpError || error instanceof IdempotencyError || error instanceof RateLimitUnavailableError) {
         return failure(error.status, error.code);
       }
       try { if (hooks.onError !== undefined) invoke(hooks.onError, options, [error, request]); } catch { /* Preserve generic response. */ }

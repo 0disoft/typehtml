@@ -1,7 +1,7 @@
 import { SUPPORTED_CSRF_FIELD, SUPPORTED_REQUEST_KEY_FIELD, type ObjectSchema } from '../contract/types.ts';
 import { validateBusinessInput } from '../runtime/input.ts';
 import { validateOutputObject } from '../runtime/output.ts';
-import { readUrlEncodedForm } from '../runtime/wire.ts';
+import { readUrlEncodedForm, WireError } from '../runtime/wire.ts';
 import type { DefinedForm, InferSchema } from './definition.ts';
 import { renderFormErrors } from './html.ts';
 import { createBoundaryHandler, type BoundaryHooks, type BoundaryInvalidContext } from './boundary.ts';
@@ -18,7 +18,8 @@ export interface FormHandlerOptions<I extends ObjectSchema, O extends ObjectSche
 export function createFormHandler<I extends ObjectSchema, O extends ObjectSchema, Principal extends object, Result>(
   form: DefinedForm<I, O>, options: FormHandlerOptions<I, O, Principal, Result>,
 ): (request: Request) => Promise<Response> {
-  const acceptRequestKey = options.acceptRequestKey === true;
+  if (form.definition.protocol?.requestKey === 'required' && options.acceptRequestKey === false) throw new TypeError('handler cannot disable the declared request key');
+  const acceptRequestKey = options.acceptRequestKey === true || form.definition.protocol?.requestKey === 'required';
   const errors = options.errors === undefined ? undefined : Object.freeze({ ...options.errors, messages: options.errors.messages === undefined ? undefined : Object.freeze({ ...options.errors.messages }) });
   return createBoundaryHandler({
     path: form.path, limits: form.limits,
@@ -26,6 +27,7 @@ export function createFormHandler<I extends ObjectSchema, O extends ObjectSchema
       const parsed = await readUrlEncodedForm(request, {
         ...form.limits, csrfField: SUPPORTED_CSRF_FIELD, requestKeyField: SUPPORTED_REQUEST_KEY_FIELD, expectRequestKey: acceptRequestKey,
       });
+      if (parsed.requestKey !== null && !/^[A-Za-z0-9_-]{16,128}$/.test(parsed.requestKey)) throw new WireError(400, 'INVALID_REQUEST_KEY');
       return { csrf: parsed.csrf, raw: parsed.fields, ...(parsed.requestKey === null ? {} : { requestKey: parsed.requestKey }), validate: () => {
         const validation = validateBusinessInput(form.input, parsed.fields);
         return validation.ok ? { ok: true as const, value: validation.value as InferSchema<I> } : validation;

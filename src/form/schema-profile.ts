@@ -44,6 +44,7 @@ export function getSchemaFormProfile(form: DefinedSchemaForm, options: SchemaFor
   }
   const profile = defineForm({
     id: form.id, path: form.path, limits: form.limits,
+    ...(form.protocol === undefined ? {} : { protocol: form.protocol }),
     input: { type: 'object', additionalProperties: false, required, properties }, output: options.output,
   });
   return Object.freeze({ form: profile, runtimeValidationCoverage: 'not-statically-analyzed' });

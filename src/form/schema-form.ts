@@ -15,6 +15,7 @@ export interface SchemaFormDefinition<Fields extends FormFields, Input extends A
   readonly output: Output;
   readonly limits?: Partial<FormReadLimits>;
   readonly validationTimeoutMs?: number;
+  readonly protocol?: Readonly<{ requestKey: 'required' }>;
 }
 export interface DefinedSchemaForm<Fields extends FormFields = FormFields, Input extends AnyStandardSchema = AnyStandardSchema, Output extends AnyStandardSchema = AnyStandardSchema> {
   readonly kind: 'typehtml-schema-form/1';
@@ -25,6 +26,7 @@ export interface DefinedSchemaForm<Fields extends FormFields = FormFields, Input
   readonly output: Output;
   readonly limits: Required<FormReadLimits>;
   readonly validationTimeoutMs: number;
+  readonly protocol?: Readonly<{ requestKey: 'required' }>;
   /** External refinements/transforms are never represented as static Doctor proof. */
   readonly runtimeValidationCoverage: 'not-statically-analyzed';
 }
@@ -51,7 +53,7 @@ export function defineSchemaForm<const Fields extends FormFields, Input extends 
 ): DefinedSchemaForm<Fields, Input, Output> {
   // Reuse the existing canonical path, ID, and transport-limit validation.
   const marker = { type: 'object', additionalProperties: false, required: ['marker'], properties: { marker: { type: 'string' } } } as const;
-  const base = defineForm({ id: definition.id, path: definition.path, input: marker, output: marker, ...(definition.limits === undefined ? {} : { limits: definition.limits }) });
+  const base = defineForm({ id: definition.id, path: definition.path, input: marker, output: marker, ...(definition.limits === undefined ? {} : { limits: definition.limits }), ...(definition.protocol === undefined ? {} : { protocol: definition.protocol }) });
   const validationTimeoutMs = definition.validationTimeoutMs ?? 30_000;
   if (!Number.isSafeInteger(validationTimeoutMs) || validationTimeoutMs < 1 || validationTimeoutMs > 2_147_483_647) throw new TypeError('invalid validation timeout');
   return Object.freeze({
@@ -59,6 +61,7 @@ export function defineSchemaForm<const Fields extends FormFields, Input extends 
     fields: prepareFields(definition.fields) as Fields,
     input: captureSchema(definition.input), output: captureSchema(definition.output), limits: base.limits,
     validationTimeoutMs, runtimeValidationCoverage: 'not-statically-analyzed',
+    ...(base.definition.protocol === undefined ? {} : { protocol: base.definition.protocol }),
   });
 }
 
@@ -67,7 +70,8 @@ export function createSchemaFormHandler<Fields extends FormFields, Input extends
 ): (request: Request) => Promise<Response> {
   const names = Object.freeze(Object.keys(form.fields));
   const repeatable = Object.freeze(names.filter((name) => form.fields[name]!.type === 'array'));
-  const acceptRequestKey = options.acceptRequestKey === true;
+  if (form.protocol?.requestKey === 'required' && options.acceptRequestKey === false) throw new TypeError('handler cannot disable the declared request key');
+  const acceptRequestKey = options.acceptRequestKey === true || form.protocol?.requestKey === 'required';
   // Snapshot localization config, preserving callback functions but never freezing caller state.
   const errors = options.errors === undefined ? undefined : Object.freeze({ ...options.errors, messages: options.errors.messages === undefined ? undefined : Object.freeze({ ...options.errors.messages }) });
   return createBoundaryHandler({
@@ -85,7 +89,7 @@ export function createSchemaFormHandler<Fields extends FormFields, Input extends
       }
       if (csrf === undefined) throw new WireError(400, 'MISSING_CSRF');
       if (acceptRequestKey && requestKey === undefined) throw new WireError(400, 'MISSING_REQUEST_KEY');
-      if (requestKey === '') throw new WireError(400, 'INVALID_REQUEST_KEY');
+      if (requestKey !== undefined && !/^[A-Za-z0-9_-]{16,128}$/.test(requestKey)) throw new WireError(400, 'INVALID_REQUEST_KEY');
       const raw: Record<string, string | readonly string[]> = Object.create(null);
       for (const entry of business) {
         if (!Object.hasOwn(form.fields, entry.key)) continue;

@@ -25,6 +25,7 @@ export interface FormDefinition<I extends ObjectSchema = ObjectSchema, O extends
   readonly input: I;
   readonly output: O;
   readonly limits?: Partial<FormReadLimits>;
+  readonly protocol?: Readonly<{ requestKey: 'required' }>;
 }
 
 export interface DefinedForm<I extends ObjectSchema = ObjectSchema, O extends ObjectSchema = ObjectSchema> {
@@ -59,9 +60,10 @@ export function defineForm<const I extends ObjectSchema, const O extends ObjectS
   const data = decodeStrictJson(canonicalJson(definition), { integerOnly: true }) as unknown as FormDefinition<I, O>;
   if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new TypeError('form definition must be an object');
   for (const key of Object.keys(data)) {
-    if (!['format', 'id', 'path', 'input', 'output', 'limits'].includes(key)) throw new TypeError(`unknown form definition field: ${key}`);
+    if (!['format', 'id', 'path', 'input', 'output', 'limits', 'protocol'].includes(key)) throw new TypeError(`unknown form definition field: ${key}`);
   }
   if (data.format !== undefined && data.format !== FORM_FORMAT) throw new TypeError('unsupported form format');
+  if (data.protocol !== undefined && (data.protocol === null || typeof data.protocol !== 'object' || Array.isArray(data.protocol) || Object.keys(data.protocol).length !== 1 || data.protocol.requestKey !== 'required')) throw new TypeError('unsupported form protocol');
   if (typeof data.id !== 'string' || !/^[A-Za-z][A-Za-z0-9_.]*$/.test(data.id)) throw new TypeError('form id must be a stable identifier');
   if (typeof data.path !== 'string' || !data.path.startsWith('/') || data.path.startsWith('//') || /[\s\\?#:*{}]/.test(data.path) || /%(?:2f|5c)/i.test(data.path)) {
     throw new TypeError('form path must be a fixed canonical absolute path');
@@ -88,7 +90,7 @@ export function defineForm<const I extends ObjectSchema, const O extends ObjectS
   for (const [key, value] of Object.entries(limits)) {
     if (!Object.hasOwn(LIMITS, key) || !Number.isSafeInteger(value) || value <= 0) throw new TypeError(`invalid form limit: ${key}`);
   }
-  const normalized = freezeData({ format: FORM_FORMAT, id: data.id, path: data.path, input: schema, output, limits } as const);
+  const normalized = freezeData({ format: FORM_FORMAT, id: data.id, path: data.path, input: schema, output, limits, ...(data.protocol === undefined ? {} : { protocol: data.protocol }) } as const);
   return freezeData({
     id: data.id, path: data.path, input, output, limits, definition: normalized,
     behaviorSha256: sha256Hex(new TextEncoder().encode(canonicalJson(normalized))),

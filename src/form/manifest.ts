@@ -39,7 +39,7 @@ export function projectForm(form: DefinedForm, options: Readonly<{
     },
     action: { id: form.id, method: 'POST', path: form.path, encoding: 'urlencoded', parserProfile: SUPPORTED_PARSER_PROFILE },
     input: form.input,
-    protocolFields: ['_bc_csrf'],
+    protocolFields: form.definition.protocol?.requestKey === 'required' ? ['_bc_csrf', '_bc_request'] : ['_bc_csrf'],
   };
 }
 

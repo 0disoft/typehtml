@@ -90,4 +90,12 @@ describe('Standard Schema form static profile bridge', () => {
     expect(manifest.output.properties.message).toEqual({ type: 'string', maxLength: 32 });
     expect(Object.isFrozen(mutable)).toBe(false);
   });
+
+  it('declares idempotency protocol fields in the verified static projection', () => {
+    const form = defineSchemaForm({ id: 'idempotent.form', path: '/profile', fields: { name: { type: 'string' } }, input: identity, output: identity, protocol: { requestKey: 'required' } });
+    const profile = getSchemaFormProfile(form, { output });
+    const check = projectForm(profile.form, { sourcePath: 'profile.json', sourceSha256: 'a'.repeat(64) });
+    expect(check.protocolFields).toEqual(['_bc_csrf', '_bc_request']);
+    expect(schemaFormManifest(form, { output }).protocol).toEqual({ requestKey: 'required' });
+  });
 });
