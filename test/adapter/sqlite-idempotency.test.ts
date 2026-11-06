@@ -1,0 +1,68 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SqliteIdempotencyStore } from '../../src/adapter/sqlite/idempotency-store.ts';
+import { executeIdempotent, idempotencyDigest, type IdempotencyClaim } from '../../src/form/idempotency.ts';
+
+const temporary: string[] = [];
+afterEach(async () => { for (const directory of temporary.splice(0)) await rm(directory, { recursive: true, force: true }); });
+async function filename(): Promise<string> { const directory = await mkdtemp(join(tmpdir(), 'typehtml-idempotency-')); temporary.push(directory); return join(directory, 'app.sqlite'); }
+const claim: IdempotencyClaim = { scope: 'tenant/user/checkout', key: 'request_1234567890', inputDigest: idempotencyDigest({ q: 1 }), token: 'fence_12345678901', now: 100, expiresAt: 200 };
+
+describe('durable generic SQLite idempotency', () => {
+  it('shares atomic claims, fencing, replays and expiry tombstones across connections and restarts', async () => {
+    const file = await filename(); const a = new SqliteIdempotencyStore(file); const b = new SqliteIdempotencyStore(file);
+    try {
+      expect(a.claim(claim)).toEqual({ status: 'claimed' });
+      expect(b.claim({ ...claim, token: 'other_12345678901' })).toEqual({ status: 'busy' });
+      expect(b.complete(claim, 'other_12345678901', '"wrong"')).toBe(false);
+      expect(a.complete(claim, claim.token, '{"receipt":"r1"}')).toBe(true);
+      expect(b.claim(claim)).toEqual({ status: 'replay', json: '{"receipt":"r1"}' });
+      expect(b.claim({ ...claim, inputDigest: idempotencyDigest({ q: 2 }) })).toEqual({ status: 'conflict' });
+      expect(b.claim({ ...claim, now: 200, expiresAt: 300 })).toEqual({ status: 'expired' });
+    } finally { a.close(); b.close(); }
+    const reopened = new SqliteIdempotencyStore(file);
+    try { expect(reopened.claim({ ...claim, now: 201, expiresAt: 300 })).toEqual({ status: 'expired' }); }
+    finally { reopened.close(); }
+  });
+
+  it('persists uncertainty and never reexecutes a failed external effect', async () => {
+    const file = await filename(); let effects = 0; const a = new SqliteIdempotencyStore(file);
+    const options = { ...claim, store: a, authorize: () => true, now: () => 100, execute: () => { effects++; throw new Error('unknown external commit'); } };
+    try { await expect(executeIdempotent(options)).rejects.toThrow('unknown external commit'); } finally { a.close(); }
+    const b = new SqliteIdempotencyStore(file);
+    try { await expect(executeIdempotent({ ...options, store: b })).rejects.toMatchObject({ code: 'IDEMPOTENCY_UNKNOWN' }); expect(effects).toBe(1); }
+    finally { b.close(); }
+  });
+
+  it('commits same-database business writes and replay records in one transaction', async () => {
+    const file = await filename(); const store = new SqliteIdempotencyStore(file); let executions = 0; let authorizations = 0;
+    const options = { ...claim, now: () => 100, authorize: () => { authorizations++; return true; }, execute: (db: import('bun:sqlite').Database) => {
+      executions++; db.exec('CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY) STRICT');
+      db.query('INSERT INTO receipts VALUES (?)').run('r1');
+      return { receipt: 'r1' };
+    } };
+    try {
+      expect(store.executeAtomic(options)).toEqual({ value: { receipt: 'r1' }, replayed: false });
+      expect(store.executeAtomic(options)).toEqual({ value: { receipt: 'r1' }, replayed: true });
+      expect(executions).toBe(1); expect(authorizations).toBe(2);
+      expect(() => store.executeAtomic({ ...options, authorize: () => false })).toThrow('FORBIDDEN');
+    } finally { store.close(); }
+  });
+
+  it('rolls back same-database effects and claims together on failure or cancellation', async () => {
+    const store = new SqliteIdempotencyStore(await filename());
+    let calls = 0;
+    const options = { ...claim, now: () => 100, authorize: () => true, execute: (db: import('bun:sqlite').Database) => {
+      calls++; db.exec('CREATE TABLE rolled_back (id INTEGER) STRICT'); throw new Error('rollback');
+    } };
+    try {
+      expect(() => store.executeAtomic(options)).toThrow('rollback');
+      const controller = new AbortController(); const reason = new Error('cancel');
+      expect(() => store.executeAtomic({ ...options, signal: controller.signal, execute: (db) => { db.exec('CREATE TABLE rolled_back (id INTEGER) STRICT'); controller.abort(reason); return 'receipt'; } })).toThrow(reason);
+      expect(store.executeAtomic({ ...options, execute: (db) => { db.exec('CREATE TABLE rolled_back (id INTEGER) STRICT'); return 'receipt'; } })).toEqual({ value: 'receipt', replayed: false });
+      expect(calls).toBe(1);
+    } finally { store.close(); }
+  });
+});
