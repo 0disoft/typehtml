@@ -22,7 +22,7 @@ export interface BoundaryInvalidContext<Principal, Raw = RawFormValues> {
   readonly csrfToken: string;
   readonly requestKey?: string;
 }
-export interface BoundaryHooks<Input, Output, Principal extends object, Result, Raw = RawFormValues> {
+export interface BoundaryHooks<Input, Output, Principal extends object, Result, Raw = RawFormValues, Projected = Output> {
   readonly allowedOrigins: readonly string[];
   /** Require one _bc_request field and expose it to execute; no store is selected implicitly. */
   readonly acceptRequestKey?: boolean;
@@ -36,7 +36,7 @@ export interface BoundaryHooks<Input, Output, Principal extends object, Result, 
   readonly authorize: (context: FormContext<Input, Principal>) => MaybePromise<boolean>;
   /** The host owns transactions and external effects; this callback is never retried. */
   readonly execute: (context: FormContext<Input, Principal>) => MaybePromise<Result>;
-  readonly project: (result: Result) => MaybePromise<Output>;
+  readonly project: (result: Result) => MaybePromise<Projected>;
   readonly success: (output: Output) => MaybePromise<Readonly<{ location: string }>>;
   readonly invalid?: (context: BoundaryInvalidContext<Principal, Raw>) => MaybePromise<string>;
   readonly onError?: (error: unknown, request: Request) => void;
@@ -49,11 +49,11 @@ export class FormHttpError extends Error {
 }
 export type BoundaryValidation<Input> = Readonly<{ ok: true; value: Input }> |
   Readonly<{ ok: false; issues: readonly InputIssue[]; unknownKeys: readonly string[] }>;
-export interface FormBoundary<Input, Output, Raw> {
+export interface FormBoundary<Input, Output, Raw, Projected = Output> {
   readonly path: string;
   readonly limits: FormReadLimits;
   readonly read: (request: Request) => Promise<Readonly<{ csrf: string; raw: Raw; requestKey?: string; validate: () => MaybePromise<BoundaryValidation<Input>> }>>;
-  readonly validateOutput: (value: Output, request: Request) => MaybePromise<Output>;
+  readonly validateOutput: (value: Projected, request: Request) => MaybePromise<Output>;
   readonly renderInvalid: (context: BoundaryInvalidContext<object, Raw>) => string;
 }
 function html(status: number, body: string, extra?: HeadersInit): Response {
@@ -71,8 +71,8 @@ function invoke<Args extends unknown[], Value>(hook: (...args: Args) => Value, r
   return Reflect.apply(hook, receiver, args);
 }
 /** Both public form APIs share these checks and preserve the legacy hook order. */
-export function createBoundaryHandler<Input, Output, Principal extends object, Result, Raw>(
-  boundary: FormBoundary<Input, Output, Raw>, options: BoundaryHooks<Input, Output, Principal, Result, Raw>,
+export function createBoundaryHandler<Input, Output, Principal extends object, Result, Raw, Projected = Output>(
+  boundary: FormBoundary<Input, Output, Raw, Projected>, options: BoundaryHooks<Input, Output, Principal, Result, Raw, Projected>,
 ): (request: Request) => Promise<Response> {
   const origins = Object.freeze([...options.allowedOrigins]);
   if (origins.length === 0) throw new TypeError('at least one allowed origin is required');
@@ -123,7 +123,10 @@ export function createBoundaryHandler<Input, Output, Principal extends object, R
         return html(422, body);
       }
       const context = Object.freeze({ request, principal, input: validation.value, ...(parsed.requestKey === undefined ? {} : { requestKey: parsed.requestKey }) });
+      request.signal.throwIfAborted();
       if (await invoke(hooks.authorize, options, [context]) !== true) return failure(404, 'NOT_FOUND');
+      // Never start a new effect after an async guard outlives its request.
+      request.signal.throwIfAborted();
       const result = await invoke(hooks.execute, options, [context]);
       const projected = await invoke(hooks.project, options, [result]);
       const output = await boundary.validateOutput(projected, request);
