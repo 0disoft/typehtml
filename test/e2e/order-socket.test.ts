@@ -33,18 +33,17 @@ describe('order demo over a real socket', () => {
       now,
     });
     const sessions = new InMemorySessionStore();
-    const origins: string[] = [];
-    const app = createOrderApp({
-      loaded,
-      coordinator,
-      sessions,
-      allowedOrigins: origins,
-      demo: { principal, productId: 'p_100' },
-    });
-    const server = Bun.serve({ port: 0, fetch: app.fetch });
+    const server = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 503 }) });
     const base = 'http://127.0.0.1:' + String(server.port);
-    origins.push(base);
     try {
+      const app = createOrderApp({
+        loaded,
+        coordinator,
+        sessions,
+        allowedOrigins: [base],
+        demo: { principal, productId: 'p_100' },
+      });
+      server.reload({ fetch: app.fetch });
       const login = await fetch(base + '/login', { redirect: 'manual' });
       expect(login.status).toBe(303);
       const setCookie = login.headers.get('set-cookie');
