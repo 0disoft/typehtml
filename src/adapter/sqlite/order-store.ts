@@ -267,9 +267,54 @@ CREATE INDEX IF NOT EXISTS form_intents_owner
 CREATE INDEX IF NOT EXISTS form_intents_open_owner_expiry
   ON form_intents (tenant_id, subject_id, action_id, expires_at)
   WHERE consumed_at IS NULL;
+CREATE INDEX IF NOT EXISTS form_intents_issued
+  ON form_intents (issued_at);
+CREATE INDEX IF NOT EXISTS form_intents_open_expiry
+  ON form_intents (expires_at)
+  WHERE consumed_at IS NULL;
 CREATE INDEX IF NOT EXISTS action_results_expiry
   ON action_results (expires_at);
 `;
+
+const RETENTION_MATCH = `
+  (i.consumed_at IS NULL AND r.intent_id IS NULL AND d.id IS NULL AND i.expires_at <= ?)
+  OR (i.consumed_at IS NOT NULL AND r.intent_id IS NOT NULL AND d.id = r.draft_id
+      AND r.behavior_hash = i.behavior_hash AND r.completed_at = i.consumed_at
+      AND d.tenant_id = i.tenant_id AND d.subject_id = i.subject_id
+      AND d.product_id = i.product_id AND d.product_revision = i.resource_revision
+      AND r.expires_at <= ?)`;
+
+// The dense-expiry fast path inspects at most one batch in the required output order.
+const CLEANUP_EARLIEST = `
+  SELECT i.id FROM (
+    SELECT rowid AS row_order, * FROM form_intents INDEXED BY form_intents_issued
+    ORDER BY issued_at, rowid LIMIT ?
+  ) AS i
+  LEFT JOIN action_results AS r ON r.intent_id = i.id
+  LEFT JOIN order_drafts AS d ON d.intent_id = i.id
+  WHERE ${RETENTION_MATCH}
+  ORDER BY i.issued_at, i.row_order`;
+
+// Sparse expiry must not walk all of the unexpired history to find a later candidate.
+const CLEANUP_EXPIRED = `
+  SELECT id FROM (
+    SELECT i.id, i.issued_at, i.rowid AS row_order
+    FROM form_intents AS i INDEXED BY form_intents_open_expiry
+    LEFT JOIN action_results AS r ON r.intent_id = i.id
+    LEFT JOIN order_drafts AS d ON d.intent_id = i.id
+    WHERE i.consumed_at IS NULL AND i.expires_at <= ?
+      AND r.intent_id IS NULL AND d.id IS NULL
+    UNION ALL
+    SELECT i.id, i.issued_at, i.rowid AS row_order
+    FROM action_results AS r INDEXED BY action_results_expiry
+    JOIN form_intents AS i ON i.id = r.intent_id
+    JOIN order_drafts AS d ON d.intent_id = i.id
+    WHERE r.expires_at <= ? AND i.consumed_at IS NOT NULL
+      AND d.id = r.draft_id AND r.behavior_hash = i.behavior_hash
+      AND r.completed_at = i.consumed_at
+      AND d.tenant_id = i.tenant_id AND d.subject_id = i.subject_id
+      AND d.product_id = i.product_id AND d.product_revision = i.resource_revision
+  ) ORDER BY issued_at, row_order LIMIT ?`;
 
 class SqliteReadTx implements OrderReadTx {
   protected readonly db: Database;
@@ -739,24 +784,14 @@ export class SqliteOrderStore implements OrderStorage {
   async cleanupExpired(now = this.now(), limit = 100): Promise<number> {
     const bounded = Math.max(1, Math.min(100, Math.trunc(limit)));
     return this.immediate(() => {
-      const result = this.db
-        .query(
-          `DELETE FROM form_intents
-            WHERE id IN (
-              SELECT i.id FROM form_intents AS i
-              LEFT JOIN action_results AS r ON r.intent_id = i.id
-              LEFT JOIN order_drafts AS d ON d.intent_id = i.id
-              WHERE (i.consumed_at IS NULL AND r.intent_id IS NULL AND d.id IS NULL
-                     AND i.expires_at <= ?)
-                 OR (i.consumed_at IS NOT NULL AND r.intent_id IS NOT NULL AND d.id = r.draft_id
-                     AND r.behavior_hash = i.behavior_hash AND r.completed_at = i.consumed_at
-                     AND d.tenant_id = i.tenant_id AND d.subject_id = i.subject_id
-                     AND d.product_id = i.product_id AND d.product_revision = i.resource_revision
-                     AND r.expires_at <= ?)
-              ORDER BY i.issued_at LIMIT ?
-            )`,
-        )
-        .run(now, now, bounded);
+      let candidates = this.db.query(CLEANUP_EARLIEST).all(bounded, now, now) as { id: string }[];
+      if (candidates.length < bounded) {
+        candidates = this.db.query(CLEANUP_EXPIRED).all(now, now, bounded) as { id: string }[];
+      }
+      if (candidates.length === 0) return 0;
+      const placeholders = candidates.map(() => '?').join(',');
+      const result = this.db.query(`DELETE FROM form_intents WHERE id IN (${placeholders})`)
+        .run(...candidates.map(({ id }) => id));
       return result.changes;
     });
   }

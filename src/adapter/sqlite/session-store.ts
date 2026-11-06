@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { createHash, randomBytes } from 'node:crypto';
+import { setImmediate as yieldToLoop } from 'node:timers/promises';
 import type { Principal } from '../../runtime/order.ts';
 import type { Session, SessionStore, CredentialStore } from '../../runtime/session.ts';
 
@@ -36,6 +37,22 @@ export type SqliteSessionStoreOptions = Readonly<{
   ttlSeconds?: number;
   now?: () => number;
 }>;
+
+export type SessionPruneOptions = Readonly<{
+  batchSize?: number;
+  signal?: AbortSignal;
+  yield?: (signal?: AbortSignal) => Promise<void>;
+}>;
+
+const DEFAULT_PRUNE_BATCH_SIZE = 100;
+const MAX_PRUNE_BATCH_SIZE = 1000;
+
+function pruneBatchSize(limit: number): number {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_PRUNE_BATCH_SIZE) {
+    throw new RangeError(`session prune batch size must be an integer from 1 to ${MAX_PRUNE_BATCH_SIZE}`);
+  }
+  return limit;
+}
 
 export class SqliteSessionStore implements SessionStore {
   private readonly db: Database;
@@ -100,8 +117,33 @@ export class SqliteSessionStore implements SessionStore {
     this.db.query('DELETE FROM auth_sessions WHERE token_hash = ?').run(hashToken(id));
   }
 
-  pruneExpired(): number {
-    const result = this.db.query('DELETE FROM auth_sessions WHERE expires_at <= ?').run(this.now());
+  /** Deletes one bounded batch; the returned count describes this batch only. */
+  pruneExpired(limit = DEFAULT_PRUNE_BATCH_SIZE): number {
+    return this.pruneExpiredAt(this.now(), pruneBatchSize(limit));
+  }
+
+  /** Drains the initial expiry cutoff while releasing the writer and event loop between batches. */
+  async pruneExpiredAsync(options: SessionPruneOptions = {}): Promise<number> {
+    const batchSize = pruneBatchSize(options.batchSize ?? DEFAULT_PRUNE_BATCH_SIZE);
+    const { signal } = options;
+    const yieldBatch = options.yield ?? ((abortSignal) => yieldToLoop(undefined, { signal: abortSignal }));
+    signal?.throwIfAborted();
+    const cutoff = this.now();
+    let total = 0;
+    for (;;) {
+      signal?.throwIfAborted();
+      const deleted = this.pruneExpiredAt(cutoff, batchSize);
+      total += deleted;
+      if (deleted < batchSize) return total;
+      await yieldBatch(signal);
+    }
+  }
+
+  private pruneExpiredAt(cutoff: number, limit: number): number {
+    const result = this.db.query(`DELETE FROM auth_sessions WHERE token_hash IN (
+      SELECT token_hash FROM auth_sessions WHERE expires_at <= ?
+      ORDER BY expires_at, rowid LIMIT ?
+    )`).run(cutoff, limit);
     return Number(result.changes);
   }
 
