@@ -184,6 +184,25 @@ function insideDatalist(element: P5Element): boolean {
   return false;
 }
 
+function indexDynamicControls(elements: readonly P5Element[]): {
+  readonly descendants: ReadonlySet<P5Element>;
+  readonly formAttributes: ReadonlySet<string | null>;
+} {
+  const descendants = new Set<P5Element>();
+  const formAttributes = new Set<string | null>();
+  // Reverse document order visits children before their parents, including non-form ancestors.
+  for (let index = elements.length - 1; index >= 0; index--) {
+    const element = elements[index]!;
+    if (element.tagName.includes('-')) {
+      descendants.add(element);
+      formAttributes.add(attribute(element, 'form'));
+    }
+    const parent = parentOf(element);
+    if (descendants.has(element) && parent !== null && isElement(parent)) descendants.add(parent);
+  }
+  return { descendants, formAttributes };
+}
+
 export function parseHtmlDocument(html: string, documentUrl: string, path = '<html>'): ParsedDocument {
   let parsed: URL;
   try {
@@ -198,21 +217,21 @@ export function parseHtmlDocument(html: string, documentUrl: string, path = '<ht
   const elements: P5Element[] = [];
   walkElements(document, elements);
   const baseUrl = firstBaseUrl(documentUrl, elements);
+  const dynamic = indexDynamicControls(elements);
+  const elementOrder = new Map<P5Element, number>();
   let order = 0;
   const forms: P5Element[] = [];
-  const formIds = new Map<string, P5Element[]>();
   const elementsById = new Map<string, P5Element[]>();
   for (const element of elements) {
+    elementOrder.set(element, elementOrder.size);
     const elementId = attribute(element, 'id');
-    if (elementId) elementsById.set(elementId, [...(elementsById.get(elementId) ?? []), element]);
+    if (elementId) {
+      const list = elementsById.get(elementId) ?? [];
+      list.push(element);
+      elementsById.set(elementId, list);
+    }
     if (element.tagName !== 'form') continue;
     forms.push(element);
-    const id = attribute(element, 'id');
-    if (id !== null && id !== '') {
-      const list = formIds.get(id) ?? [];
-      list.push(element);
-      formIds.set(id, list);
-    }
   }
   const controls = elements
     .filter((element) => !insideDatalist(element) && ['input', 'select', 'textarea', 'button'].includes(element.tagName))
@@ -230,23 +249,26 @@ export function parseHtmlDocument(html: string, documentUrl: string, path = '<ht
     }
     if (owner) controlByForm.get(owner)?.push(control);
   }
+  const formIdFact = new Map<string, FormFact[]>();
   const formFacts: FormFact[] = forms.map((element) => {
     const id = attribute(element, 'id');
-    return {
+    const fact: FormFact = {
       element,
       id: id === '' ? null : id,
-      order: elements.indexOf(element),
+      order: elementOrder.get(element)!,
       location: locationOf(element, path),
       controls: (controlByForm.get(element) ?? []).sort((a, b) => a.order - b.order),
       documentUrl,
       baseUrl,
-      hasDynamicControls: elements.some((candidate) => candidate.tagName.includes('-') && (isInside(candidate, element) || attribute(candidate, 'form') === id)),
+      hasDynamicControls: dynamic.descendants.has(element) || dynamic.formAttributes.has(id),
     };
+    if (id !== null && id !== '') {
+      const list = formIdFact.get(id) ?? [];
+      list.push(fact);
+      formIdFact.set(id, list);
+    }
+    return fact;
   });
-  const formIdFact = new Map<string, FormFact[]>();
-  for (const [id, list] of formIds) {
-    formIdFact.set(id, list.map((element) => formFacts.find((fact) => fact.element === element)!));
-  }
   return {
     documentUrl,
     baseUrl,
