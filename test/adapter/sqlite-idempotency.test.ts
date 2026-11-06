@@ -82,8 +82,45 @@ describe('durable generic SQLite idempotency', () => {
     try {
       expect(() => store.executeAtomic({ ...options, execute: (async () => { calls++; await Promise.resolve(); return 'late'; }) as never })).toThrow('synchronous');
       expect(() => store.executeAtomic({ ...options, authorize: (async () => { calls++; return true; }) as never })).toThrow('synchronous');
+      expect(() => store.executeAtomic({ ...options, execute: (async () => { calls++; await Promise.resolve(); return 'late'; }).bind(null) as never })).toThrow('synchronous');
+      expect(() => store.executeAtomic({ ...options, authorize: (async () => { calls++; return true; }).bind(null) as never })).toThrow('synchronous');
       expect(calls).toBe(0);
       expect(store.executeAtomic(options).value).toBe('receipt');
+    } finally { store.close(); }
+  });
+
+  it('checks current permissions inside the same immediate transaction on execution and replay', async () => {
+    const file = await filename(); const store = new SqliteIdempotencyStore(file); const db = new Database(file, { strict: true });
+    db.exec('CREATE TABLE permissions (allowed INTEGER NOT NULL) STRICT; INSERT INTO permissions VALUES (1); PRAGMA busy_timeout=0;');
+    let transaction: Database | undefined; let executions = 0; let checks = 0;
+    const options = { ...claim, now: () => 100, authorize: (current: Database) => {
+      transaction = current; checks++;
+      expect(current.inTransaction).toBe(true);
+      expect(() => db.query('UPDATE permissions SET allowed = 0').run()).toThrow();
+      return (current.query('SELECT allowed FROM permissions').get() as { allowed: number }).allowed === 1;
+    }, execute: (current: Database) => {
+      expect(current === transaction).toBe(true); expect(current.inTransaction).toBe(true); executions++; return 'receipt';
+    } };
+    try {
+      expect(store.executeAtomic(options)).toEqual({ value: 'receipt', replayed: false });
+      expect(store.executeAtomic(options)).toEqual({ value: 'receipt', replayed: true });
+      db.query('UPDATE permissions SET allowed = 0').run();
+      expect(() => store.executeAtomic(options)).toThrow('IDEMPOTENCY_FORBIDDEN');
+      expect(executions).toBe(1); expect(checks).toBe(3);
+    } finally { db.close(); store.close(); }
+  });
+
+  it('captures callback references and timing policy before authorization can mutate caller options', () => {
+    const store = new SqliteIdempotencyStore(':memory:'); let executions = 0; let lateCalls = 0;
+    const options = { ...claim, now: () => 100, ttlMs: 10, authorize: () => {
+      options.execute = (async () => { lateCalls++; await Promise.resolve(); return 'late'; }) as never;
+      options.now = () => 1000; options.ttlMs = 0;
+      return true;
+    }, execute: () => { executions++; return 'original'; } };
+    try {
+      expect(store.executeAtomic(options)).toEqual({ value: 'original', replayed: false });
+      expect(executions).toBe(1); expect(lateCalls).toBe(0);
+      expect(store.claim({ ...claim, now: 109, expiresAt: 200 })).toMatchObject({ status: 'replay', expiresAt: 110 });
     } finally { store.close(); }
   });
 

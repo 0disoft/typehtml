@@ -7,6 +7,11 @@ import {
 
 interface Row { input_digest: string; token: string; expires_at: number; state: 'pending' | 'complete' | 'unknown'; outcome_json: string | null }
 
+function isDeclaredAsync(callback: Function): boolean {
+  // util/types does not recognize bound async functions, but their intrinsic tag is retained.
+  return isAsyncFunction(callback) || Object.prototype.toString.call(callback) === '[object AsyncFunction]';
+}
+
 /** Durable token-fenced storage. Keys are never silently recycled; expired rows remain uniqueness tombstones. */
 export class SqliteIdempotencyStore implements IdempotencyStore {
   private readonly db: Database;
@@ -77,7 +82,7 @@ export class SqliteIdempotencyStore implements IdempotencyStore {
    * External effects cannot be rolled back by SQLite; use an outbox for those effects.
    */
   executeAtomic<T extends IdempotencyJson>(options: IdempotencyIdentity & Readonly<{
-    authorize: () => boolean;
+    authorize: (db: Database) => boolean;
     execute: (db: Database) => T;
     signal?: AbortSignal;
     ttlMs?: number;
@@ -86,17 +91,20 @@ export class SqliteIdempotencyStore implements IdempotencyStore {
   }>): Readonly<{ value: T; replayed: boolean }> {
     const identity = Object.freeze({ scope: options.scope, key: options.key, inputDigest: options.inputDigest });
     assertIdempotencyIdentity(identity);
-    const { signal } = options;
-    signal?.throwIfAborted();
-    if (isAsyncFunction(options.execute) || isAsyncFunction(options.authorize)) throw new TypeError('executeAtomic callbacks must be synchronous');
-    if (options.authorize() !== true) throw new IdempotencyError(403, 'IDEMPOTENCY_FORBIDDEN');
-    signal?.throwIfAborted();
-    const token = (options.newToken ?? createIdempotencyKey)();
+    const { signal, authorize, execute } = options;
+    const clock = options.now ?? Date.now;
+    const newToken = options.newToken ?? createIdempotencyKey;
     const ttl = options.ttlMs ?? 86_400_000;
-    if (!Number.isSafeInteger(ttl) || ttl <= 0) throw new RangeError('invalid idempotency TTL');
+    signal?.throwIfAborted();
+    if (isDeclaredAsync(execute) || isDeclaredAsync(authorize)) throw new TypeError('executeAtomic callbacks must be synchronous');
     return this.db.transaction(() => {
       signal?.throwIfAborted();
-      const now = (options.now ?? Date.now)();
+      // The permission read shares the write transaction's current snapshot and lock, including replay.
+      if (Reflect.apply(authorize, options, [this.db]) !== true) throw new IdempotencyError(403, 'IDEMPOTENCY_FORBIDDEN');
+      signal?.throwIfAborted();
+      const token = newToken();
+      if (!Number.isSafeInteger(ttl) || ttl <= 0) throw new RangeError('invalid idempotency TTL');
+      const now = clock();
       const claim = { ...identity, token, now, expiresAt: now + ttl };
       assertIdempotencyClaim(claim);
       const result = this.claimInsideTransaction(claim);
@@ -114,7 +122,7 @@ export class SqliteIdempotencyStore implements IdempotencyStore {
       if (result.status === 'expired') throw new IdempotencyError(410, 'IDEMPOTENCY_EXPIRED');
       if (result.status !== 'claimed') throw new IdempotencyError(409, `IDEMPOTENCY_${result.status.toUpperCase()}`);
       signal?.throwIfAborted();
-      const value = options.execute(this.db);
+      const value = Reflect.apply(execute, options, [this.db]) as T;
       const json = encodeIdempotencyValue(value);
       signal?.throwIfAborted();
       if (!this.complete(identity, token, json)) throw new IdempotencyError(503, 'IDEMPOTENCY_COMPLETION_UNCERTAIN');
