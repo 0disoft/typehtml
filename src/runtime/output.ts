@@ -14,6 +14,15 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function codePointLengthUpTo(value: string, limit: number): number {
+  let length = 0;
+  if (limit === 0) return length;
+  for (const _ of value) {
+    if (++length >= limit) break;
+  }
+  return length;
+}
+
 /** Validates the public projection before it leaves the transaction boundary. */
 export function validateOutputObject(
   schema: ObjectSchema,
@@ -42,7 +51,9 @@ export function validateOutputObject(
     const path = `$.${key}`;
     if (field.type === 'string') {
       if (typeof item !== 'string') throw new OutputValidationError(path, 'must be a string');
-      const length = [...item].length;
+      // Count only enough to decide both bounds, retaining minimum-before-maximum errors.
+      const countLimit = Math.max(field.minLength ?? 0, field.maxLength === undefined ? 0 : field.maxLength + 1);
+      const length = codePointLengthUpTo(item, countLimit);
       if (field.minLength !== undefined && length < field.minLength) {
         throw new OutputValidationError(path, `must be at least ${field.minLength} characters`);
       }
