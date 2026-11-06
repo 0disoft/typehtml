@@ -46,4 +46,17 @@ describe('TypeHTML CLI', () => {
       await rm(parent, { recursive: true, force: true });
     }
   });
+
+  it('emits requested text and SARIF formats while retaining execution failure status', () => {
+    const text = cli('doctor', '--config', 'missing-doctor-file.json', '--format', 'text');
+    expect(text.exitCode).toBe(2);
+    expect(text.stdout).toContain('TypeHTML Doctor: configuration-error; exit 2');
+    const sarif = cli('doctor', '--config', 'missing-doctor-file.json', '--format', 'sarif');
+    expect(sarif.exitCode).toBe(2);
+    expect(JSON.parse(sarif.stdout).version).toBe('2.1.0');
+    expect(JSON.parse(sarif.stdout).runs[0].invocations[0].executionSuccessful).toBe(false);
+    for (const flags of [['--format', 'xml'], ['--format', 'text', '--format', 'json'], ['--watch', '--watch']]) {
+      expect(cli('doctor', '--config', 'missing.json', ...flags).exitCode).toBe(2);
+    }
+  });
 });

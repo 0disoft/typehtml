@@ -4,3 +4,7 @@ export * from './config.ts';
 export * from './analyze.ts';
 export { DEFAULT_ANALYSIS_LIMITS } from './budget.ts';
 export type { AnalysisLimits } from './budget.ts';
+export * from './capture.ts';
+export * from './format.ts';
+export * from './watch.ts';
+export * from './lsp.ts';

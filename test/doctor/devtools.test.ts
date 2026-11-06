@@ -1,0 +1,98 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { Readable, Writable } from 'node:stream';
+import { defineForm } from '../../src/form/definition.ts';
+import { loadForm, projectForm } from '../../src/form/manifest.ts';
+import { collectRenderedHtml, writeRenderedCollection } from '../../src/doctor/capture.ts';
+import { runDoctor } from '../../src/doctor/analyze.ts';
+import { watchDoctor } from '../../src/doctor/watch.ts';
+import { runDoctorLanguageServer } from '../../src/doctor/lsp.ts';
+
+const dirs: string[] = [];
+afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
+const validHtml = '<form id="form" method="post" action="/send"><textarea name="name"></textarea><input type="hidden" name="_bc_csrf"><button>Send</button></form>';
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), 'typehtml-devtools-')); dirs.push(root);
+  const form = defineForm({ id: 'test.send', path: '/send', input: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string' } } },
+    output: { type: 'object', additionalProperties: false, required: ['status'], properties: { status: { type: 'string' } } } });
+  await writeFile(join(root, 'form.json'), JSON.stringify(form.definition));
+  const loaded = await loadForm(join(root, 'form.json'));
+  await writeFile(join(root, 'projection.json'), JSON.stringify(projectForm(form, { sourcePath: 'form.json', sourceSha256: loaded.sourceSha256 })));
+  const collection = await collectRenderedHtml({ allowedOrigins: ['https://example.test'], selections: [{ id: 'initial', url: 'https://example.test/form', bindings: [
+    { formId: 'form', actionId: form.id, required: true, submitterPolicy: 'enumerate-native', constraintMismatchSeverity: 'warning' },
+  ] }], render: () => validHtml });
+  const result = await writeRenderedCollection(collection, { directory: join(root, 'snapshots'), root, inputs: [{ kind: 'form-projection', path: 'projection.json' }] });
+  return { root, configPath: result.configPath, htmlPath: join(root, 'snapshots/initial.html') };
+}
+
+function packet(message: unknown): Buffer {
+  const body = Buffer.from(JSON.stringify({ jsonrpc: '2.0', ...message as object }));
+  return Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]);
+}
+
+function unpack(buffer: Buffer): any[] {
+  const messages: any[] = [];
+  while (buffer.length) {
+    const split = buffer.indexOf('\r\n\r\n');
+    const length = Number(/Content-Length: ([0-9]+)/.exec(buffer.subarray(0, split).toString())![1]);
+    messages.push(JSON.parse(buffer.subarray(split + 4, split + 4 + length).toString()));
+    buffer = buffer.subarray(split + 4 + length);
+  }
+  return messages;
+}
+
+describe('Doctor development integrations', () => {
+  test('captured rendered HTML is directly analyzable with verified contract provenance', async () => {
+    const { configPath } = await fixture();
+    const report = await runDoctor(configPath);
+    expect(report.exitCode).toBe(0);
+    expect(report.scope.paths).toBe(1);
+    expect(report.submissions[0]?.artifact.sourceKind).toBe('rendered-html');
+    expect(report.scope.applicationCompleteness).toBe('not-evaluated');
+  });
+
+  test('managed watch detects selected document changes without overlapping analyses', async () => {
+    const { configPath, htmlPath } = await fixture();
+    const codes: number[] = [];
+    await watchDoctor(configPath, { signal: new AbortController().signal, intervalMs: 10, maxRuns: 2, onReport: async (report) => {
+      codes.push(report.exitCode);
+      if (codes.length === 1) await writeFile(htmlPath, validHtml.replace('name="name"', 'name="unknown"'));
+    } });
+    expect(codes).toEqual([0, 1]);
+  });
+
+  test('watch cancellation stops its timer and returns without another report', async () => {
+    const { configPath } = await fixture();
+    const controller = new AbortController();
+    let reports = 0;
+    await watchDoctor(configPath, { signal: controller.signal, intervalMs: 10, onReport: () => { reports++; controller.abort(); } });
+    expect(reports).toBe(1);
+  });
+
+  test('stdio LSP frames initialize, persisted diagnostics, shutdown and exit', async () => {
+    const { configPath, htmlPath } = await fixture();
+    await writeFile(htmlPath, validHtml.replace('name="name"', 'name="unknown"'));
+    const input = Buffer.concat([packet({ id: 1, method: 'initialize', params: {} }), packet({ method: 'initialized', params: {} }), packet({ id: 2, method: 'shutdown' }), packet({ method: 'exit' })]);
+    const chunks: Buffer[] = [];
+    const output = new Writable({ write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); } });
+    await runDoctorLanguageServer(configPath, Readable.from([input.subarray(0, 7), input.subarray(7, 50), input.subarray(50)]), output);
+    const messages = unpack(Buffer.concat(chunks));
+    expect(messages[0].result.capabilities.textDocumentSync.change).toBe(0);
+    const diagnostics = messages.find((message) => message.method === 'textDocument/publishDiagnostics' && message.params.uri === pathToFileURL(htmlPath).href);
+    expect(diagnostics.params.diagnostics.some((item: any) => item.code === 'BC010')).toBe(true);
+    expect(diagnostics.params.diagnostics[0].range.start.line).toBe(0);
+    expect(messages.at(-1)).toMatchObject({ id: 2, result: null });
+  });
+
+  test('LSP rejects oversized messages and handles invalid JSON without protocol log pollution', async () => {
+    const chunks: Buffer[] = [];
+    const output = new Writable({ write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); } });
+    await runDoctorLanguageServer('missing.json', Readable.from([Buffer.from('Content-Length: 1\r\n\r\n{')]), output);
+    expect(unpack(Buffer.concat(chunks))[0].error.code).toBe(-32700);
+    await expect(runDoctorLanguageServer('missing.json', Readable.from([Buffer.from('Content-Length: 1048577\r\n\r\n')]), output)).rejects.toThrow('bounds');
+  });
+});
