@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Readable, Writable } from 'node:stream';
 import { defineForm } from '../../src/form/definition.ts';
@@ -53,6 +53,40 @@ describe('Doctor development integrations', () => {
     expect(report.scope.paths).toBe(1);
     expect(report.submissions[0]?.artifact.sourceKind).toBe('rendered-html');
     expect(report.scope.applicationCompleteness).toBe('not-evaluated');
+  });
+
+  test('CLI captures a live selected HTML response and emits verified Doctor SARIF', async () => {
+    const { root } = await fixture();
+    const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response(validHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }) });
+    try {
+      const origin = `http://127.0.0.1:${server.port}`;
+      const manifestPath = join(root, 'capture.json');
+      const directory = join(root, 'live-snapshots');
+      await writeFile(manifestPath, JSON.stringify({ format: 'typehtml-capture/1', root,
+        allowedOrigins: [origin], inputs: [{ kind: 'form-projection', path: 'projection.json' }],
+        selections: [{ id: 'live', url: `${origin}/form`, bindings: [{ formId: 'form', actionId: 'test.send' }] }],
+      }));
+      const cli = resolve(import.meta.dir, '../../src/cli.ts');
+      const execute = async (...args: string[]) => {
+        const process = Bun.spawn([Bun.which('bun')!, cli, ...args], { stdout: 'pipe', stderr: 'pipe' });
+        const [exitCode, stdout, stderr] = await Promise.all([process.exited, new Response(process.stdout).text(), new Response(process.stderr).text()]);
+        return { exitCode, stdout, stderr };
+      };
+      const capture = await execute('capture', '--config', manifestPath, '--out-dir', directory);
+      expect(capture.stderr).toBe('');
+      expect(capture.exitCode).toBe(0);
+      const result = JSON.parse(capture.stdout);
+      expect(result.snapshots).toBe(1);
+      expect(await readFile(join(directory, 'live.html'), 'utf8')).toBe(validHtml);
+      const doctor = await execute('doctor', '--config', result.configPath, '--format', 'sarif');
+      expect(doctor.stderr).toBe('');
+      expect(doctor.exitCode).toBe(0);
+      const sarif = JSON.parse(doctor.stdout);
+      expect(sarif.version).toBe('2.1.0');
+      expect(sarif.runs[0].properties.scope.documents).toBe(1);
+      expect(sarif.runs[0].properties.scope.paths).toBe(1);
+      expect(sarif.runs[0].properties.applicationCompleteness).toBe('not-evaluated');
+    } finally { await server.stop(true); }
   });
 
   test('managed watch detects selected document changes without overlapping analyses', async () => {

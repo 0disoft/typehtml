@@ -36,10 +36,19 @@ async function selectedPaths(configPath: string, previous: readonly string[] = [
 }
 
 async function fingerprint(paths: readonly string[]): Promise<string> {
-  return JSON.stringify(await Promise.all(paths.map(async (path) => {
-    try { const info = await stat(path, { bigint: true }); return [path, String(info.mtimeNs), String(info.size), String(info.ino)]; }
-    catch { return [path, 'unreadable']; }
-  })));
+  const stamps: string[][] = new Array(paths.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const index = next++;
+      const path = paths[index];
+      if (path === undefined) return;
+      try { const info = await stat(path, { bigint: true }); stamps[index] = [path, String(info.mtimeNs), String(info.size), String(info.ino)]; }
+      catch { stamps[index] = [path, 'unreadable']; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, paths.length) }, worker));
+  return JSON.stringify(stamps);
 }
 
 /** Explicit, host-owned polling watch; one analysis at a time and no recursive directory watchers. */
