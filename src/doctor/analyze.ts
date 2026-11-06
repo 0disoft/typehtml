@@ -20,6 +20,8 @@ import type {
   SubmissionFact,
 } from './types.ts';
 import { diagnosticError, diagnosticUnknown } from './types.ts';
+import { acceptsNativeInteger, nativeIntegerLimits, readNativeIntegerConstraints, selectNativeIntegerControl } from './constraints.ts';
+import type { NativeIntegerControl, NativeIntegerLimit } from './constraints.ts';
 
 const MAX_REPORT_FINDINGS = 1000;
 const DOCTOR_EXIT = { success: 0, defect: 1, executionError: 2, incomplete: 3 } as const;
@@ -322,63 +324,10 @@ function checkConstraints(
   for (const [name, schema] of Object.entries(check.input.schema.properties)) {
     const entry = collection.entries.find((candidate) => candidate.name === name);
     if (!entry) continue;
-    const control = entry.control;
-    // The witness proves native acceptance, not just a difference between attributes.
-    if (skipValidation || control.readonly || control.tagName !== 'input') {
-      incomplete = true;
-      continue;
-    }
-    const pattern = attribute(control.element, 'pattern');
-    const knownTextPattern = control.type === 'text' && pattern === '([1-9]|1[0-9]|20)';
-    if (schema.type !== 'integer' || (control.type !== 'number' && !knownTextPattern)) {
-      incomplete = true;
-      continue;
-    }
+    const native = selectNativeIntegerControl(schema, entry.control, skipValidation);
+    if (native === null) { incomplete = true; continue; }
     compared = true;
-    const numberAttribute = (key: string): number | null => {
-      const raw = attribute(control.element, key);
-      if (raw === null || raw.trim() === '' || !/^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(raw)) return null;
-      const number = Number(raw);
-      return Number.isFinite(number) ? number : null;
-    };
-    const htmlMin = control.type === 'number' ? numberAttribute('min') : null;
-    const htmlMax = control.type === 'number' ? numberAttribute('max') : null;
-    const rawStep = attribute(control.element, 'step');
-    const numberStep = numberAttribute('step');
-    const step = rawStep?.toLowerCase() === 'any' ? null : numberStep !== null && numberStep > 0 ? numberStep : 1;
-    const base = htmlMin ?? numberAttribute('value') ?? 0;
-    const accepts = (candidate: number) => {
-      if (!Number.isSafeInteger(candidate) || (htmlMin !== null && candidate < htmlMin) || (htmlMax !== null && candidate > htmlMax)) return false;
-      if (knownTextPattern) {
-        const raw = String(candidate);
-        const minimumLength = numberAttribute('minlength');
-        const maximumLength = numberAttribute('maxlength');
-        return /^(?:[1-9]|1[0-9]|20)$/.test(raw) && (minimumLength === null || raw.length >= minimumLength) && (maximumLength === null || raw.length <= maximumLength);
-      }
-      if (step === null) return true;
-      const quotient = (candidate - base) / step;
-      return Math.abs(quotient - Math.round(quotient)) < 1e-9;
-    };
-    const limits = [
-      { kind: 'max', server: schema.maximum, candidate: schema.maximum === undefined ? undefined : schema.maximum + 1, html: htmlMax },
-      { kind: 'min', server: schema.minimum, candidate: schema.minimum === undefined ? undefined : schema.minimum - 1, html: htmlMin },
-    ] as const;
-    for (const limit of limits) {
-      if (limit.candidate === undefined || limit.server === undefined || !accepts(limit.candidate)) continue;
-      collector.add({
-        ...diagnosticError('BC013', 'known-constraint-witness', `${binding.actionId}/${name}/${limit.kind}-witness`, `${limit.kind}-witness`, `native ${control.type} control permits ${limit.candidate}, which the selected contract rejects`, control.location, binding.constraintMismatchSeverity),
-        witness: {
-          rawValue: String(limit.candidate), codecValue: limit.candidate,
-          codec: 'decimal-integer',
-          schemaPointer: `/input/schema/properties/${name.replace(/~/g, '~0').replace(/\//g, '~1')}/${limit.kind === 'max' ? 'maximum' : 'minimum'}`,
-          source: check.source,
-          synthetic: true,
-          nativeValidation: 'enabled-for-selected-activation',
-          ...(limit.kind === 'max' ? { hypotheticalServerMaximum: limit.server } : { hypotheticalServerMinimum: limit.server }),
-          ...(limit.kind === 'max' && limit.html !== null ? { unchangedHtmlMaximum: limit.html } : {}),
-        },
-      });
-    }
+    emitConstraintWitnesses(collector, check, binding, name, native);
   }
   collector.cover({
     target: `${documentPath}#${binding.formId}`,
@@ -388,6 +337,39 @@ function checkConstraints(
     note: compared ? 'bounded integer witnesses checked against native min/max/step or the known ASCII integer pattern; this is not equivalence proof' : 'no supported native integer constraint comparison; other constraint semantics remain unknown',
   });
 }
+
+function emitConstraintWitnesses(
+  collector: Collector, check: FormCheck,
+  binding: { actionId: string; constraintMismatchSeverity: Severity }, name: string, native: NativeIntegerControl,
+): void {
+  const constraints = readNativeIntegerConstraints(native);
+  for (const limit of nativeIntegerLimits(native.schema, constraints)) {
+    const { candidate, server } = limit;
+    if (candidate === undefined || server === undefined || !acceptsNativeInteger(candidate, constraints)) continue;
+    collector.add(constraintWitness(check, binding, name, native.control, { ...limit, candidate, server }));
+  }
+}
+
+/** Calculate one public witness record without changing the schema, control, or collector. */
+function constraintWitness(
+  check: FormCheck, binding: { actionId: string; constraintMismatchSeverity: Severity }, name: string, control: ControlFact,
+  limit: NativeIntegerLimit & { readonly candidate: number; readonly server: number },
+): Diagnostic {
+  return {
+    ...diagnosticError('BC013', 'known-constraint-witness', `${binding.actionId}/${name}/${limit.kind}-witness`, `${limit.kind}-witness`, `native ${control.type} control permits ${limit.candidate}, which the selected contract rejects`, control.location, binding.constraintMismatchSeverity),
+    witness: {
+      rawValue: String(limit.candidate), codecValue: limit.candidate,
+      codec: 'decimal-integer',
+      schemaPointer: `/input/schema/properties/${name.replace(/~/g, '~0').replace(/\//g, '~1')}/${limit.kind === 'max' ? 'maximum' : 'minimum'}`,
+      source: check.source,
+      synthetic: true,
+      nativeValidation: 'enabled-for-selected-activation',
+      ...(limit.kind === 'max' ? { hypotheticalServerMaximum: limit.server } : { hypotheticalServerMinimum: limit.server }),
+      ...(limit.kind === 'max' && limit.html !== null ? { unchangedHtmlMaximum: limit.html } : {}),
+    },
+  };
+}
+
 interface AnalysisState {
   readonly collector: Collector;
   readonly submissions: SubmissionFact[];
