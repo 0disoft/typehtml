@@ -135,7 +135,12 @@ export class SqliteSessionStore implements SessionStore {
       const deleted = this.pruneExpiredAt(cutoff, batchSize);
       total += deleted;
       if (deleted < batchSize) return total;
-      await yieldBatch(signal);
+      try {
+        await yieldBatch(signal);
+      } catch (error) {
+        signal?.throwIfAborted();
+        throw error;
+      }
     }
   }
 
