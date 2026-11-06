@@ -1,4 +1,5 @@
 import { makeCollector, type Collector } from './collector.ts';
+import { AnalysisBudget, type AnalysisLimits } from './budget.ts';
 import type { FormCheck } from '../contract/types.ts';
 import { sourceSha256 } from '../contract/behavior.ts';
 import {
@@ -291,6 +292,7 @@ function constraintWitness(
 
 interface AnalysisState {
   readonly collector: Collector;
+  readonly budget: AnalysisBudget;
   readonly submissions: SubmissionFact[];
   readonly executionErrors: string[];
   totalBytes: number;
@@ -313,18 +315,20 @@ type BoundForm = Readonly<{
   check: FormCheck;
 }>;
 
-async function analyzeLoaded(loaded: LoadedDoctorConfig): Promise<DoctorReport> {
+async function analyzeLoaded(loaded: LoadedDoctorConfig, limits: Partial<AnalysisLimits>): Promise<DoctorReport> {
   const state: AnalysisState = {
-    collector: makeCollector(loaded), submissions: [], executionErrors: [],
+    collector: makeCollector(loaded), budget: new AnalysisBudget(limits), submissions: [], executionErrors: [],
     totalBytes: 0, documents: 0, forms: 0, bindings: 0, paths: 0,
   };
   for (const document of loaded.config.documents) {
+    if (state.budget.exhausted) break;
     const snapshot = await readStableDocument(loaded, document, state);
     if (snapshot === 'budget-exceeded') break;
     if (snapshot === null) continue;
     state.documents += 1;
     state.forms += snapshot.parsed.forms.length;
     for (const binding of document.bindings) {
+      if (state.budget.exhausted) break;
       state.collector.scope(binding.required, 'binding', targetPath(document.path, binding));
       state.bindings += 1;
       analyzeBinding(loaded, snapshot, binding, state);
@@ -457,10 +461,17 @@ function analyzeBinding(loaded: LoadedDoctorConfig, snapshot: DocumentSnapshot, 
     return;
   }
   for (const submitter of submitters) {
+    if (!state.budget.beginPath(form.controls.length)) {
+      recordAnalysisLimit(state, bound);
+      break;
+    }
     const activation = submitter ? `submitter@${submitter.location.offset}` : 'implicit-without-button';
     collector.scope(binding.required, activation);
     state.paths += 1;
-    analyzeActivation(state, bound, submitter, activation);
+    if (!analyzeActivation(state, bound, submitter, activation)) {
+      recordAnalysisLimit(state, bound);
+      break;
+    }
   }
   collector.scope(binding.required, 'binding');
   collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'runtime-security', actualStatus: 'not-evaluated',
@@ -469,17 +480,28 @@ function analyzeBinding(loaded: LoadedDoctorConfig, snapshot: DocumentSnapshot, 
     note: 'application route graph and bypass scanning were not provided to the form-only Doctor' });
 }
 
-function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: ControlFact | null, activation: string): void {
+function recordAnalysisLimit(state: AnalysisState, bound: BoundForm): void {
+  const { binding, snapshot: { document }, form } = bound;
+  state.collector.scope(binding.required, 'binding');
+  state.collector.add(diagnosticUnknown('BC012', 'analysis-budget', `${document.path}/${binding.formId}/analysis-budget`,
+    'analysis-budget-exceeded', `analysis stopped at ${state.budget.reason}; remaining native paths were not evaluated`, form.location));
+  state.collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'binding', actualStatus: 'not-evaluated',
+    evidenceRef: form.location, note: 'analysis resource limit was reached; this boundary is incomplete' });
+}
+
+function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: ControlFact | null, activation: string): boolean {
   const { collector, submissions } = state;
   const { snapshot: { document }, binding, form, check } = bound;
   const location = submitter?.location ?? form.location;
   const resolved = resolveEffectiveTarget(form, submitter);
   const collection = collectFormEntries(form, submitter);
   const entriesByName = indexEntries(collection.entries);
-  submissions.push(submissionFact(bound, submitter, activation, resolved, collection, entriesByName));
+  const fact = submissionFact(bound, submitter, activation, resolved, collection, entriesByName);
+  if (!state.budget.acceptSubmission(fact)) return false;
+  submissions.push(fact);
   if (resolved.target === null) {
     recordUnsupportedTarget(collector, bound, location, resolved);
-    return;
+    return true;
   }
   if (resolved.target.url.origin !== new URL(document.documentUrl).origin) {
     collector.add(diagnosticError('BC011', 'method-path-mismatch', `${binding.actionId}/native/target-external`, 'external-origin',
@@ -491,10 +513,11 @@ function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: Co
   if (resolved.problem?.code === 'UNSUPPORTED_ENCODING' || resolved.problem?.code === 'UNSUPPORTED_METHOD') {
     collector.add(diagnosticUnknown('BC012', 'unsupported-transport', `${binding.actionId}/native/${resolved.problem.code}`, `unsupported-${resolved.problem.code.toLowerCase()}`, resolved.problem.message, location));
     collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'target', actualStatus: 'unsupported', evidenceRef: location, note: resolved.problem.message });
-    return;
+    return true;
   }
   checkSupply(collector, check, form, collection, entriesByName, document.path, binding, location);
   checkConstraints(collector, check, entriesByName, document.path, binding, resolved.target.skipValidation);
+  return true;
 }
 
 /** New provenance records keep parsed controls and configured bindings unchanged. */
@@ -530,7 +553,7 @@ function completeReport(loaded: LoadedDoctorConfig, state: AnalysisState): Docto
     collector.completeBoundary();
   }
   const exitCode = executionErrors.length > 0 ? DOCTOR_EXIT.executionError
-    : collector.hasError() ? DOCTOR_EXIT.defect : collector.isIncomplete() ? DOCTOR_EXIT.incomplete : DOCTOR_EXIT.success;
+    : collector.hasError() ? DOCTOR_EXIT.defect : state.budget.exhausted || collector.isIncomplete() ? DOCTOR_EXIT.incomplete : DOCTOR_EXIT.success;
   return {
     format: 'boundary-doctor-report/0.1-draft',
     status: executionErrors.length > 0 ? 'configuration-error' : 'executed',
@@ -541,15 +564,16 @@ function completeReport(loaded: LoadedDoctorConfig, state: AnalysisState): Docto
     coverage: collector.coverage,
     submissions,
     findingsTruncated: collector.truncated(),
+    ...(state.budget.exhausted ? { analysisTruncated: true } : {}),
     exitCode,
     ...(executionErrors.length > 0 ? { error: executionErrors.join('\n') } : {}),
   };
 }
 
-export async function runDoctor(configPath: string): Promise<DoctorReport> {
+export async function runDoctor(configPath: string, limits: Partial<AnalysisLimits> = {}): Promise<DoctorReport> {
   try {
     const loaded = await loadDoctorConfig(configPath);
-    return await analyzeLoaded(loaded);
+    return await analyzeLoaded(loaded, limits);
   } catch (error) {
     if (error instanceof DoctorConfigError) return configErrorReport(configPath, error.message);
     return configErrorReport(configPath, error instanceof Error ? error.message : 'unexpected Doctor failure');

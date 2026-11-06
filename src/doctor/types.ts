@@ -88,6 +88,8 @@ export interface DoctorReport {
   readonly coverage: readonly CoverageRow[];
   readonly submissions: readonly SubmissionFact[];
   readonly findingsTruncated: boolean;
+  /** Present when resource limits stopped analysis; an incomplete run cannot exit successfully. */
+  readonly analysisTruncated?: boolean;
   readonly exitCode: 0 | 1 | 2 | 3;
   readonly error?: string;
 }
