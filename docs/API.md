@@ -179,6 +179,10 @@ For programmatic use, `projectForm(form, { sourcePath, sourceSha256, generator? 
 
 Doctor analyzes selected native paths, not an entire application's protection. It handles supported fixed controls and submitters, records source/activation/target evidence, and keeps unknown/unsupported coverage separate. Native checkbox/radio/select/textarea/file semantics and arbitrary JavaScript mutation are not implemented by this initial static profile. Static success does not validate CSRF, authentication, current object policy, or database behavior.
 
+Doctor bounds each run to 1,000 native paths, 100,000 control visits across those paths, and 4 MiB of compact UTF-8 JSON in the `submissions` array. This byte limit covers submission evidence, not the entire report or pretty-printing. Evidence is measured incrementally before it is retained. When a limit stops analysis, the report includes `analysisTruncated: true` and an `analysis-budget-exceeded` finding; remaining boundaries are not evaluated. This produces exit code 3 even when incomplete coverage was allowed by the audit policy. Existing confirmed defects and execution errors retain exit codes 1 and 2 respectively.
+
+The `doctor` entry point exports `DEFAULT_ANALYSIS_LIMITS` and `AnalysisLimits`. Programmatic callers can override individual limits with `runDoctor(configPath, { maxPaths, maxControlVisits, maxSubmissionBytes })`; omitted values keep their defaults. Increase these limits only for workloads whose processing and report sizes your host can accommodate.
+
 ## Lower-level helpers
 
 The root entry point also exports `validateBusinessInput`, `validateOutputObject`, `OutputValidationError`, `csrfTokenMatches`, `assertCsrfToken`, and `CsrfError`, plus input/schema/projection types. Prefer the higher-level form handler unless your existing server already supplies the equivalent ordered boundary checks.
@@ -188,3 +192,7 @@ The `contract`, `doctor`, and `runtime` entry points expose their named function
 `loadBoundaryContract(path)` and `loadFormCheck(path)` return deeply frozen snapshots, including their raw JSON values, validated fields, arrays, and metadata. Use `structuredClone(loaded.value)` to prepare editable data, and reload the revised contract to obtain matching validation and hash metadata.
 
 In the Bun order reference, `createOrderApp` captures its origin list, authentication mode and credential-store reference, demo values, and ingress hook at creation. `OrderCoordinator` captures its binding methods. Create a new app or coordinator to replace those settings or hooks. Captured hooks keep their original receivers; store state and authorization facts remain live and are rechecked in the existing transaction phases.
+
+Form handlers and reference apps prepare their captured origin allowlists once. Advanced callers can use `prepareOriginPolicy({ allowedOrigins })` from the `runtime` entry point and pass its immutable snapshot to `assertRequestOrigin`. Ordinary, unprepared policy objects still reflect caller changes on every call.
+
+In `SqliteSessionStore`, `pruneExpired(limit = 100)` now deletes one bounded batch and returns that batch's deleted count. The optional limit is an integer from 1 to 1,000. Callers that previously relied on one call deleting every expired session should use `await pruneExpiredAsync({ batchSize: 100, signal })` instead. The asynchronous drain fixes its expiry cutoff at the start and releases the SQLite writer and event loop between batches; completed batches remain committed if cancellation or a later failure stops the drain. Intent retention cleanup likewise preserves expiry, consistency and oldest-issued ordering while using indexed candidate selection.
