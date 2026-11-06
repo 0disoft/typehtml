@@ -15,21 +15,30 @@ function asObject(value: JsonValue): JsonObject {
   return value;
 }
 
+/** Only loader-owned, bounded JSON data reaches this snapshot boundary. */
+function freezeSnapshot<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freezeSnapshot(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 export async function loadBoundaryContract(path: string): Promise<LoadedBoundaryContract> {
   const bytes = await readBoundedJsonBytes(path);
   const value = asObject(decodeStrictJson(bytes, { integerOnly: true }));
   const contract: BoundaryContract = validateBoundaryContract(value);
-  return {
+  return freezeSnapshot({
     contract,
     value,
     sourceSha256: sourceHash(bytes),
     behaviorSha256: computeBehaviorSha256(value),
-  };
+  });
 }
 
 export async function loadFormCheck(path: string): Promise<LoadedFormCheck> {
   const bytes = await readBoundedJsonBytes(path);
   const value = asObject(decodeStrictJson(bytes, { integerOnly: true }));
   const formCheck: FormCheck = validateFormCheck(value);
-  return { formCheck, value };
+  return freezeSnapshot({ formCheck, value });
 }
