@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -149,5 +149,19 @@ describe('Doctor development integrations', () => {
     await runDoctorLanguageServer('missing.json', Readable.from([Buffer.from('Content-Length: 1\r\n\r\n{')]), output);
     expect(unpack(Buffer.concat(chunks))[0].error.code).toBe(-32700);
     await expect(runDoctorLanguageServer('missing.json', Readable.from([Buffer.from('Content-Length: 1048577\r\n\r\n')]), output)).rejects.toThrow('bounds');
+  });
+
+  test('assembles byte-fragmented LSP bodies without repeatedly copying accumulated input', async () => {
+    const input = packet({ id: 1, method: 'initialize', params: { ignored: 'x'.repeat(32_768) } });
+    const fragments = async function* () { for (let index = 0; index < input.length; index++) yield input.subarray(index, index + 1); };
+    const chunks: Buffer[] = [];
+    const output = new Writable({ write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); } });
+    const concat = spyOn(Buffer, 'concat');
+    try {
+      await runDoctorLanguageServer('unused.json', fragments(), output);
+      // Only output framing needs concatenation; growing an input prefix per fragment is quadratic.
+      expect(concat.mock.calls.length).toBeLessThanOrEqual(2);
+    } finally { concat.mockRestore(); }
+    expect(unpack(Buffer.concat(chunks))[0].id).toBe(1);
   });
 });

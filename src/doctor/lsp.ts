@@ -3,8 +3,8 @@ import { pathToFileURL } from 'node:url';
 import { runDoctor } from './analyze.ts';
 import { loadDoctorConfig } from './config.ts';
 import { VERSION } from '../version.ts';
+import { readLspFrames } from './lsp-frames.ts';
 
-const MAX_MESSAGE_BYTES = 1024 * 1024;
 interface RpcMessage { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> }
 /** Minimal stdio contract keeps Node type packages optional for other Doctor consumers. */
 export interface DoctorLspOutput {
@@ -13,7 +13,6 @@ export interface DoctorLspOutput {
 
 /** Persisted-snapshot diagnostics over stdio. Does not analyze unsaved JSX, execute app code, or discover routes. */
 export async function runDoctorLanguageServer(configPath: string, input: AsyncIterable<Uint8Array | string>, output: DoctorLspOutput): Promise<void> {
-  let buffer = Buffer.alloc(0);
   let shutdown = false;
   let exited = false;
   let lastUris = new Set<string>();
@@ -68,26 +67,12 @@ export async function runDoctorLanguageServer(configPath: string, input: AsyncIt
     if (['initialized', 'textDocument/didOpen', 'textDocument/didSave', 'workspace/didChangeConfiguration'].includes(message.method)) { await publish(); return; }
     if (message.id !== undefined) await send({ id: message.id, error: { code: -32601, message: 'Method not found' } });
   };
-  for await (const chunk of input) {
-    buffer = Buffer.concat([buffer, typeof chunk === 'string' ? Buffer.from(chunk) : chunk]);
-    while (!exited) {
-      const split = buffer.indexOf('\r\n\r\n');
-      if (split < 0) { if (buffer.length > 8192) throw new RangeError('LSP header exceeds bounds'); break; }
-      if (split > 8192) throw new RangeError('LSP header exceeds bounds');
-      const lengths = [...buffer.subarray(0, split).toString('ascii').matchAll(/^Content-Length:\s*([0-9]+)\s*$/gim)];
-      if (lengths.length !== 1) throw new TypeError('LSP requires one Content-Length header');
-      const length = Number(lengths[0]![1]);
-      if (!Number.isSafeInteger(length) || length < 1 || length > MAX_MESSAGE_BYTES) throw new RangeError('LSP message exceeds bounds');
-      if (buffer.length < split + 4 + length) break;
-      const body = buffer.subarray(split + 4, split + 4 + length);
-      buffer = buffer.subarray(split + 4 + length);
-      let message: unknown;
-      try { message = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)); }
-      catch { await send({ id: null, error: { code: -32700, message: 'Parse error' } }); continue; }
-      if (message === null || typeof message !== 'object' || Array.isArray(message)) { await send({ id: null, error: { code: -32600, message: 'Invalid Request' } }); continue; }
-      await handle(message as RpcMessage);
-    }
+  for await (const body of readLspFrames(input)) {
+    let message: unknown;
+    try { message = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)); }
+    catch { await send({ id: null, error: { code: -32700, message: 'Parse error' } }); continue; }
+    if (message === null || typeof message !== 'object' || Array.isArray(message)) { await send({ id: null, error: { code: -32600, message: 'Invalid Request' } }); continue; }
+    await handle(message as RpcMessage);
     if (exited) return;
   }
-  if (buffer.length !== 0) throw new TypeError('incomplete LSP frame');
 }
