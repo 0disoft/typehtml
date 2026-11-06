@@ -135,6 +135,60 @@ describe('Standard Schema native forms', () => {
     expect(html).not.toContain('tags[0]');
   });
 
+  test('maps a nested repeated element issue to its full fixed wire path', async () => {
+    const repeated = defineSchemaForm({ id: 'nested.repeat', path: '/profile', fields: {
+      'items[0].tags': { type: 'array', items: { type: 'string' } },
+    }, input: z.object({ items: z.array(z.object({ tags: z.array(z.string().min(2)) })) }), output: z.string() });
+    let issueField: string | null | undefined;
+    const handle = createSchemaFormHandler(repeated, { allowedOrigins: [origin], authenticate: () => ({}), csrfToken: () => 'token', authorize: () => true,
+      execute: () => 'ok', project: (x) => x, success: () => ({ location: '/' }),
+      invalid: (context) => { issueField = context.issues[0]?.field; return renderSchemaFormErrors(repeated, context.rawValues, context.issues, context.csrfToken); },
+    });
+    const response = await handle(request(new URLSearchParams([['_bc_csrf', 'token'], ['items[0].tags', 'a']])));
+    const html = await response.text();
+    expect(response.status).toBe(422);
+    expect(issueField).toBe('items[0].tags');
+    expect(html).toContain('name="items[0].tags" type="text" aria-invalid="true"');
+    expect(html).toContain('a href="#field-');
+  });
+
+  test('projects the output schema input and passes its transformed output to success', async () => {
+    const transformed = defineSchemaForm({ id: 'output.transform', path: '/profile', fields: { name: { type: 'string' } },
+      input: z.object({ name: z.string() }),
+      output: z.object({ count: z.string().transform((value) => ({ total: Number(value) })) }),
+    });
+    let count: number | undefined;
+    const handle = createSchemaFormHandler(transformed, { allowedOrigins: [origin], authenticate: () => ({}), csrfToken: () => 'token', authorize: () => true,
+      execute: () => ({ count: '7' }), project: (result) => result,
+      success: (result) => { count = result.count.total; return { location: `/done?count=${result.count.total}` }; },
+    });
+    const response = await handle(request(new URLSearchParams({ _bc_csrf: 'token', name: 'Ada' })));
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('/done?count=7');
+    expect(count).toBe(7);
+    if (false) {
+      createSchemaFormHandler(transformed, { allowedOrigins: [origin], authenticate: () => ({}), csrfToken: () => 'token', authorize: () => true,
+        execute: () => '7',
+        // @ts-expect-error project returns the vendor schema's input, not its transformed output
+        project: () => ({ count: { total: 7 } }),
+        success: () => ({ location: '/' }),
+      });
+    }
+  });
+
+  test('treats an unrepresentable root array issue as a form-level error', async () => {
+    const rootIssue = defineSchemaForm({ id: 'root.issue', path: '/profile', fields: { name: { type: 'string' } },
+      input: { '~standard': { version: 1, vendor: 'test', validate: () => ({ issues: [{ message: 'root array issue', path: [0] }] }) } }, output: z.string(),
+    });
+    let issueField: string | null | undefined;
+    const handle = createSchemaFormHandler(rootIssue, { allowedOrigins: [origin], authenticate: () => ({}), csrfToken: () => 'token', authorize: () => true,
+      execute: () => 'ok', project: (value) => value, success: () => ({ location: '/' }),
+      invalid: (context) => { issueField = context.issues[0]?.field; return 'invalid'; },
+    });
+    expect((await handle(request(new URLSearchParams({ _bc_csrf: 'token', name: 'Ada' })))).status).toBe(422);
+    expect(issueField).toBeNull();
+  });
+
   test('preserves explicit false boolean tokens and repeated boolean values on 422', async () => {
     const booleans = defineSchemaForm({ id: 'bool.form', path: '/profile', fields: {
       agreed: { type: 'boolean', trueValue: 'yes', falseValue: 'no', required: true },

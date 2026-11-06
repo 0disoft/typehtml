@@ -2,7 +2,7 @@ import { defineForm } from './definition.ts';
 import { createBoundaryHandler, type BoundaryHooks, type RawFormValues } from './boundary.ts';
 import { decodeFormFields, prepareFields, type FormFields } from './fields.ts';
 import { readUrlEncodedEntries, WireError, type FormReadLimits, type FormEntry } from '../runtime/wire.ts';
-import { validateStandard, standardIssuesToInputIssues, type AnyStandardSchema, type InferStandardOutput } from './standard-schema.ts';
+import { validateStandard, standardIssuesToInputIssues, type AnyStandardSchema, type InferStandardInput, type InferStandardOutput } from './standard-schema.ts';
 import { renderSchemaFormErrors } from './schema-html.ts';
 import type { FormStateOptions } from './state.ts';
 
@@ -32,8 +32,8 @@ export interface DefinedSchemaForm<Fields extends FormFields = FormFields, Input
 }
 export type SchemaFormInput<Form extends DefinedSchemaForm> = InferStandardOutput<Form['input']>;
 export type SchemaFormOutput<Form extends DefinedSchemaForm> = InferStandardOutput<Form['output']>;
-export interface SchemaFormHandlerOptions<Input, Output, Principal extends object, Result>
-  extends BoundaryHooks<Input, Output, Principal, Result, RawFormValues> {
+export interface SchemaFormHandlerOptions<Input, Output, Principal extends object, Result, Projected = Output>
+  extends BoundaryHooks<Input, Output, Principal, Result, RawFormValues, Projected> {
   readonly errors?: FormStateOptions & Readonly<{ title?: string; summaryTitle?: string; submitLabel?: string }>;
 }
 
@@ -66,7 +66,7 @@ export function defineSchemaForm<const Fields extends FormFields, Input extends 
 }
 
 export function createSchemaFormHandler<Fields extends FormFields, Input extends AnyStandardSchema, Output extends AnyStandardSchema, Principal extends object, Result>(
-  form: DefinedSchemaForm<Fields, Input, Output>, options: SchemaFormHandlerOptions<InferStandardOutput<Input>, InferStandardOutput<Output>, Principal, Result>,
+  form: DefinedSchemaForm<Fields, Input, Output>, options: SchemaFormHandlerOptions<InferStandardOutput<Input>, InferStandardOutput<Output>, Principal, Result, InferStandardInput<Output>>,
 ): (request: Request) => Promise<Response> {
   const names = Object.freeze(Object.keys(form.fields));
   const repeatable = Object.freeze(names.filter((name) => form.fields[name]!.type === 'array'));
@@ -108,8 +108,11 @@ export function createSchemaFormHandler<Fields extends FormFields, Input extends
           const field = issue.field;
           if (field !== null && Object.hasOwn(form.fields, field)) return issue;
           // Repeated wire values use one name even when a validator reports an element index.
-          const array = field?.replace(/\[[0-9]+\](?:\..*)?$/, '');
-          if (array !== undefined && Object.hasOwn(form.fields, array) && form.fields[array]!.type === 'array') return { ...issue, field: array };
+          // Start at the deepest index: fixed outer indexes can be part of the declared wire name.
+          for (let index = field?.lastIndexOf('[') ?? -1; index > 0; index = field!.lastIndexOf('[', index - 1)) {
+            const array = field!.slice(0, index);
+            if (Object.hasOwn(form.fields, array) && form.fields[array]!.type === 'array') return { ...issue, field: array };
+          }
           return { ...issue, field: null };
         });
         return { ok: false as const, issues: Object.freeze(issues), unknownKeys: [] };
