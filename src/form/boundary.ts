@@ -3,6 +3,8 @@ import { assertCsrfToken, CsrfError } from '../runtime/csrf.ts';
 import { acceptsHtml, assertRequestOrigin, prepareOriginPolicy, NegotiationError } from '../runtime/negotiation.ts';
 import { assertFormTransport, WireError, type FormReadLimits } from '../runtime/wire.ts';
 import { renderFailure } from './html.ts';
+import { IdempotencyError } from './idempotency.ts';
+import { RateLimitError } from './security.ts';
 
 type MaybePromise<T> = T | Promise<T>;
 export type RawFormValues = Readonly<Record<string, string | readonly string[]>>;
@@ -10,6 +12,7 @@ export interface FormContext<Input, Principal> {
   readonly request: Request;
   readonly principal: Readonly<Principal>;
   readonly input: Input;
+  readonly requestKey?: string;
 }
 export interface BoundaryInvalidContext<Principal, Raw = RawFormValues> {
   readonly request: Request;
@@ -17,9 +20,12 @@ export interface BoundaryInvalidContext<Principal, Raw = RawFormValues> {
   readonly rawValues: Raw;
   readonly issues: readonly InputIssue[];
   readonly csrfToken: string;
+  readonly requestKey?: string;
 }
 export interface BoundaryHooks<Input, Output, Principal extends object, Result, Raw = RawFormValues> {
   readonly allowedOrigins: readonly string[];
+  /** Require one _bc_request field and expose it to execute; no store is selected implicitly. */
+  readonly acceptRequestKey?: boolean;
   readonly authenticate: (request: Request) => MaybePromise<Principal | null>;
   readonly csrfToken: (context: Readonly<{ request: Request; principal: Readonly<Principal> }>) => MaybePromise<string>;
   /** Omit to retain synchronizer-token comparison; provide to verify signed tokens. */
@@ -45,7 +51,7 @@ export type BoundaryValidation<Input> = Readonly<{ ok: true; value: Input }> |
 export interface FormBoundary<Input, Output, Raw> {
   readonly path: string;
   readonly limits: FormReadLimits;
-  readonly read: (request: Request) => Promise<Readonly<{ csrf: string; raw: Raw; validate: () => MaybePromise<BoundaryValidation<Input>> }>>;
+  readonly read: (request: Request) => Promise<Readonly<{ csrf: string; raw: Raw; requestKey?: string; validate: () => MaybePromise<BoundaryValidation<Input>> }>>;
   readonly validateOutput: (value: Output, request: Request) => MaybePromise<Output>;
   readonly renderInvalid: (context: BoundaryInvalidContext<object, Raw>) => string;
 }
@@ -107,12 +113,12 @@ export function createBoundaryHandler<Input, Output, Principal extends object, R
       const validation = await parsed.validate();
       if (!validation.ok && validation.unknownKeys.length > 0) return failure(400, 'UNKNOWN_FIELD');
       if (!validation.ok) {
-        const context = Object.freeze({ request, principal, rawValues: parsed.raw, issues: validation.issues, csrfToken: expected });
+        const context = Object.freeze({ request, principal, rawValues: parsed.raw, issues: validation.issues, csrfToken: expected, ...(parsed.requestKey === undefined ? {} : { requestKey: parsed.requestKey }) });
         const body = hooks.invalid === undefined ? boundary.renderInvalid(context) : await invoke(hooks.invalid, options, [context]);
         if (typeof body !== 'string') throw new TypeError('invalid renderer must return HTML');
         return html(422, body);
       }
-      const context = Object.freeze({ request, principal, input: validation.value });
+      const context = Object.freeze({ request, principal, input: validation.value, ...(parsed.requestKey === undefined ? {} : { requestKey: parsed.requestKey }) });
       if (await invoke(hooks.authorize, options, [context]) !== true) return failure(404, 'NOT_FOUND');
       const result = await invoke(hooks.execute, options, [context]);
       const projected = await invoke(hooks.project, options, [result]);
@@ -120,7 +126,8 @@ export function createBoundaryHandler<Input, Output, Principal extends object, R
       const success = await invoke(hooks.success, options, [output]);
       return html(303, '', { Location: successLocation(success, url.origin) });
     } catch (error) {
-      if (error instanceof WireError || error instanceof NegotiationError || error instanceof CsrfError || error instanceof FormHttpError) {
+      if (error instanceof RateLimitError) return failure(429, error.code, { 'Retry-After': String(error.retryAfterSeconds) });
+      if (error instanceof WireError || error instanceof NegotiationError || error instanceof CsrfError || error instanceof FormHttpError || error instanceof IdempotencyError) {
         return failure(error.status, error.code);
       }
       try { if (hooks.onError !== undefined) invoke(hooks.onError, options, [error, request]); } catch { /* Preserve generic response. */ }

@@ -1,12 +1,18 @@
 import type { ObjectSchema } from '../contract/types.ts';
 import type { InputIssue } from '../runtime/input.ts';
+import { createFormState, type FormStateOptions } from './state.ts';
 
 /** Encodes plain text for HTML text and quoted attribute contexts. */
 export function escapeHtml(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
-export function renderFormErrors(path: string, schema: ObjectSchema, raw: Readonly<Record<string, string>>, issues: readonly InputIssue[], csrfToken: string): string {
+export function renderFormErrors(path: string, schema: ObjectSchema, raw: Readonly<Record<string, string>>, issues: readonly InputIssue[], csrfToken: string,
+  options?: FormStateOptions & Readonly<{ title?: string; summaryTitle?: string; submitLabel?: string }>, requestKey?: string,
+): string {
+  const state = options === undefined ? undefined : createFormState(raw, issues, options);
+  issues = state?.issues ?? issues;
+  const title = escapeHtml(options?.title ?? 'Check your form');
   const required = new Set(schema.required);
   const errorsByField = new Map<string, InputIssue[]>();
   for (const issue of issues) {
@@ -24,7 +30,7 @@ export function renderFormErrors(path: string, schema: ObjectSchema, raw: Readon
 <input id="${id}" name="${name}" type="text"${field.type === 'integer' ? ' inputmode="numeric" pattern="(0|-?[1-9][0-9]*)"' : ''}${required.has(name) && (field.type === 'integer' || (field.minLength ?? 0) > 0) ? ' required' : ''} value="${escapeHtml(raw[name] ?? '')}"${errors.length > 0 ? ` aria-invalid="true" aria-describedby="${id}-error"` : ''}>
 ${errors.length === 0 ? '' : `<span id="${id}-error">${errors.map((issue) => escapeHtml(issue.message)).join(', ')}</span>`}</p>`;
   }).join('\n');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Check your form</title></head><body><main><h1>Check your form</h1><section aria-labelledby="errors-title" role="alert"><h2 id="errors-title">Fields to correct</h2><ul>${summary}</ul></section><form method="post" action="${escapeHtml(path)}"><input type="hidden" name="_bc_csrf" value="${escapeHtml(csrfToken)}">${fields}<button type="submit">Submit</button></form></main></body></html>`;
+  return `<!doctype html><html lang="${escapeHtml(state?.locale ?? 'en')}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title></head><body><main><h1>${title}</h1><section aria-labelledby="errors-title" role="alert"><h2 id="errors-title">${escapeHtml(options?.summaryTitle ?? 'Fields to correct')}</h2><ul>${summary}</ul></section><form method="post" action="${escapeHtml(path)}"><input type="hidden" name="_bc_csrf" value="${escapeHtml(csrfToken)}">${requestKey === undefined ? '' : `<input type="hidden" name="_bc_request" value="${escapeHtml(requestKey)}">`}${fields}<button type="submit">${escapeHtml(options?.submitLabel ?? 'Submit')}</button></form></main></body></html>`;
 }
 
 export function renderFailure(status: number, code: string): string {

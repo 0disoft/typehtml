@@ -4,23 +4,48 @@
   "type": "module",
   "description": "Typed native HTML forms, server validation, and form contract diagnostics",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/0disoft/typehtml.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0disoft/typehtml.git"
+  },
   "homepage": "https://github.com/0disoft/typehtml#readme",
-  "bugs": { "url": "https://github.com/0disoft/typehtml/issues" },
+  "bugs": {
+    "url": "https://github.com/0disoft/typehtml/issues"
+  },
   "keywords": ["html", "forms", "typescript", "validation", "bun", "hono"],
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./contract": { "types": "./dist/contract/index.d.ts", "import": "./dist/contract/index.js" },
-    "./doctor": { "types": "./dist/doctor/index.d.ts", "import": "./dist/doctor/index.js" },
-    "./runtime": { "types": "./dist/runtime/index.d.ts", "import": "./dist/runtime/index.js" },
-    "./reference/order": { "types": "./dist/reference/order.d.ts", "bun": "./dist/reference/order.js", "default": "./dist/reference/unsupported.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract/index.d.ts",
+      "import": "./dist/contract/index.js"
+    },
+    "./doctor": {
+      "types": "./dist/doctor/index.d.ts",
+      "import": "./dist/doctor/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js"
+    },
+    "./reference/order": {
+      "types": "./dist/reference/order.d.ts",
+      "bun": "./dist/reference/order.js",
+      "default": "./dist/reference/unsupported.js"
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist", "README.md", "LICENSE", "CHANGELOG.md", "docs/GETTING_STARTED.md", "docs/API.md"],
-  "publishConfig": { "access": "public", "tag": "alpha", "registry": "https://registry.npmjs.org/" },
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha",
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=22.0.0",
     "bun": ">=1.4.0"
@@ -48,6 +73,9 @@
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
-    "typescript": "^7.0.2"
+    "arktype": "^2",
+    "typescript": "^7.0.2",
+    "valibot": "^1",
+    "zod": "^4"
   }
 }
