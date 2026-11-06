@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0-alpha.2 — Local package
+
+- Preserve the flat-form API and share its request boundary with additive Standard Schema forms (Zod, Valibot, ArkType).
+- Add explicit boolean, ordered repeated-array and fixed nested-path codecs without relaxing scalar/protocol duplicate rejection.
+- Add native HTML attributes, accessible error/state helpers and configurable error messages/locales.
+- Add thin Hono, Astro, React Router, SvelteKit endpoint, Node/Express and Fastify adapters.
+- Extend Doctor to scalar textarea/select/radio/checkbox controls, bounded rendered-HTML capture, text/SARIF output, managed watch and saved-snapshot stdio LSP.
+- Add signed session-bound CSRF and bounded pluggable rate limiting.
+- Add fenced generic idempotency, bounded memory storage and a separate Bun SQLite adapter with same-database atomic business/outcome writes.
+- Declare optional request-key protocol in static manifests; retain keys and exact ordered values on invalid-form redisplay.
+- Include new integration documentation and extend fresh npm/Bun consumer verification. No registry publication.
+
 ## 0.1.0-alpha.1 — Unreleased
 
 - Introduce the scoped `@0disoft/typehtml` package with compiled ESM and TypeScript declarations.

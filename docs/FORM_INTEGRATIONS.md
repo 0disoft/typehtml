@@ -171,13 +171,13 @@ This is a native API endpoint, not an Astro Actions registration. The host still
 ### React Router action
 
 ```ts
-// Action module for the /profile server route.
+// Resource route for /profile: export no default UI component.
 import { toReactRouter } from '@0disoft/typehtml/adapters/web';
 import { handleProfile } from './profile-form.js';
 export const action = toReactRouter(handleProfile);
 ```
 
-Use a native form targeting `/profile` for the complete HTML/303 flow. Client-enhanced submission helpers that expect framework action data require application-specific handling of the returned HTML Response.
+Use a [resource route](https://reactrouter.com/how-to/resource-routes) without a default UI component and a native form targeting `/profile` for the complete HTML/303 flow. A UI route's action may be processed as action data rather than directly serving the HTML body. Client-enhanced submission helpers that expect framework action data require application-specific handling of the returned HTML Response.
 
 ### SvelteKit endpoint
 

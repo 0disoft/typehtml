@@ -23,11 +23,11 @@ bun run pack
 node dist/cli.js init ../my-typehtml-app --package-manager bun
 ```
 
-The package artifact is `artifacts/0disoft-typehtml-0.1.0-alpha.1.tgz`. In the generated project, replace the registry dependency with that local file:
+The package artifact is `artifacts/0disoft-typehtml-0.1.0-alpha.2.tgz`. In the generated project, replace the registry dependency with that local file:
 
 ```sh
 cd ../my-typehtml-app
-bun add /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.1.tgz
+bun add /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.2.tgz
 bun run generate
 bun run doctor
 bun run dev
@@ -39,7 +39,7 @@ For npm installation:
 # Run the initializer from the built TypeHTML checkout.
 node dist/cli.js init ../my-typehtml-app --package-manager npm
 cd ../my-typehtml-app
-npm install /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.1.tgz
+npm install /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.2.tgz
 npm run generate
 npm run doctor
 npm run dev
@@ -47,7 +47,7 @@ npm run dev
 
 Use a new or empty target directory. `init` refuses to overwrite an existing project's files and never runs package installation or a server for you. Paths containing spaces should be quoted using your shell's syntax.
 
-After this version is published, its registry install command will be `npm install @0disoft/typehtml@0.1.0-alpha.1` or `bun add @0disoft/typehtml@0.1.0-alpha.1`. The packed tarball is the prepublication installation path.
+After this version is published, its registry install command will be `npm install @0disoft/typehtml@0.1.0-alpha.2` or `bun add @0disoft/typehtml@0.1.0-alpha.2`. The packed tarball is the prepublication installation path.
 
 ## Starter files
 

@@ -11,7 +11,7 @@ export function toAstro(handler: WebFormHandler): (context: Readonly<{ request: 
   return async (context) => handler(context.request);
 }
 
-/** React Router route action; the form must post to its configured TypeHTML path. */
+/** React Router resource-route action (no default UI component); use native document submissions. */
 export function toReactRouter(handler: WebFormHandler): (arguments_: Readonly<{ request: Request }>) => Promise<Response> {
   return async (arguments_) => handler(arguments_.request);
 }

@@ -2,9 +2,9 @@
 
 Typed contracts for native HTML forms and server boundaries.
 
-`@0disoft/typehtml` connects a flat input schema, a native URL-encoded form, and a server handler. It provides strict request parsing, typed decoded input, explicit public output validation, and a read-only Doctor CLI that finds form/contract mismatches. It uses ordinary HTML and standard `Request`/`Response` routes.
+`@0disoft/typehtml` connects typed input schemas, native URL-encoded forms, and server handlers. Use a flat JSON contract or a Standard Schema validator with explicit transport fields. It provides strict request parsing, typed decoded input, public output validation, and a Doctor CLI that finds form/contract mismatches. It uses ordinary HTML and standard `Request`/`Response` routes.
 
-This is the first **`0.1.0-alpha.1`** package. Its public API can change before `1.0`. The npm name `typehtml` belongs to another project; this package uses the `@0disoft/typehtml` scope. Until registry publication, install the tarball built from this checkout.
+The current package is **`0.1.0-alpha.2`**. Its public API can change before `1.0`. The npm name `typehtml` belongs to another project; this package uses the `@0disoft/typehtml` scope. Install the locally built tarball; registry publication is a separate decision.
 
 ## Start a project
 
@@ -18,7 +18,7 @@ node dist/cli.js init ../my-typehtml-app
 
 cd ../my-typehtml-app
 # Replace this with the absolute path to the generated tarball.
-bun add /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.1.tgz
+bun add /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.2.tgz
 bun run generate
 bun run doctor
 bun run dev
@@ -62,20 +62,26 @@ typehtml init ./my-app
 typehtml generate --contract form.json --out-dir generated --root .
 typehtml generate --contract form.json --out-dir generated --root . --check
 typehtml doctor --config doctor.config.json
+typehtml doctor --config doctor.config.json --format sarif
+typehtml doctor --config doctor.config.json --format text --watch
+typehtml capture --config capture.json --out-dir snapshots
+typehtml lsp --config doctor.config.json
 ```
 
-`boundary` is a compatibility alias for the same CLI. Generation emits data and TypeScript types; it does not generate a server. Doctor prints one JSON report and does not execute project configuration or application modules.
+`boundary` is a compatibility alias for the same CLI. Generation emits data and TypeScript types; it does not generate a server. Doctor defaults to one JSON report and does not execute application modules. Capture fetches only explicitly selected HTML states; watch and LSP start only when requested. See the [integration guide](docs/FORM_INTEGRATIONS.md) for complete options and examples.
 
 ## Support and responsibilities
 
-- Native URL-encoded POST forms with flat string and safe-integer fields.
+- Native URL-encoded POST forms with flat JSON contracts, or Standard Schema validators with explicit string/integer/boolean, repeated-array, and fixed nested-path transport fields.
 - Strict duplicate/unknown-key rejection, bounded body reads, origin/CSRF checks, explicit authentication and authorization hooks, and validated public output.
 - Selected static form snapshots: explicit form bindings, effective submitter targets, required-field supply, scalar cardinality, and bounded integer constraint witnesses.
 - Node.js 22+ and Bun 1.4+ for the core and CLI. The SQLite order reference is a separate Bun-only entry point.
+- HTML attribute/state/i18n helpers; Hono, Node/Express, Fastify, Astro, React Router, and SvelteKit endpoint adapters.
+- Optional signed CSRF, bounded rate-limit integration, generic fenced idempotency stores, and a separate Bun SQLite idempotency adapter.
 
-The generic handler does not supply an account system, a database transaction, or exactly-once execution. Your application owns those operations and any side effects inside its hooks. The Bun SQLite order reference demonstrates one explicit transaction/idempotency profile.
+The generic handler does not supply an account system or automatically coordinate database transactions. Your application owns side effects. The generic idempotency wrapper makes no exactly-once claim for external effects; the Bun SQLite adapter can commit same-database business writes and outcomes atomically. Memory stores are development-only.
 
-Files, multipart, nested objects, checkbox/radio/select/textarea semantics, arbitrary JavaScript serialization, and general information-flow analysis are outside the initial Doctor profile. Unsupported and unknown results stay visible; an empty finding list is not a claim that the whole application is safe. TypeHTML does not add a UI framework, a template language, or a reactivity model.
+Doctor supports selected scalar input, textarea, select, checkbox and radio semantics. Its verified manifest profile remains flat string/integer data: nested, array and boolean runtime schemas and opaque validator refinements are not static proof. Files, multipart, arbitrary JavaScript serialization and general information-flow analysis remain outside scope. Unsupported and unknown results stay visible; an empty finding list does not prove whole-application safety. TypeHTML adds no UI framework, template language or reactivity model.
 
 ## Development and evidence
 

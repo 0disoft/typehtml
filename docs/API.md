@@ -1,6 +1,6 @@
 # Public API
 
-The initial `0.1.0-alpha.1` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`.
+The `0.1.0-alpha.2` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
 
 | Entry point | Purpose | Runtime |
 | --- | --- | --- |
@@ -8,6 +8,9 @@ The initial `0.1.0-alpha.1` API is ESM with TypeScript declarations. Import docu
 | `@0disoft/typehtml/contract` | Advanced schema validation, strict JSON, digests, and original boundary-contract helpers | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/doctor` | Programmatic form snapshot analysis and report types | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/runtime` | Lower-level transport and validation primitives | Node.js 22+ / Bun 1.4+ |
+| `@0disoft/typehtml/adapters/web` | Hono, Astro, React Router and SvelteKit endpoint adapters | Node.js 22+ / Bun 1.4+ |
+| `@0disoft/typehtml/adapters/node` | Raw Node/Express and Fastify route adapters | Node.js 22+ / Bun 1.4+ |
+| `@0disoft/typehtml/sqlite/idempotency` | Durable generic idempotency and same-database atomic writes | Bun 1.4+ |
 | `@0disoft/typehtml/reference/order` | Explicit Bun SQLite/Hono order reference | Bun 1.4+ |
 
 The public core is server-side code, not a browser bundle. The separate order reference is application-specific and does not turn the generic handler into a transaction coordinator.
@@ -67,7 +70,7 @@ Optional `limits` override these positive-integer defaults:
 | `maxValueBytes` | 1,024 UTF-8 bytes per decoded value |
 | `readTimeoutMs` | 30,000 ms |
 
-Body reads are bounded even without `Content-Length`. The wrapper accepts only UTF-8 URL encoding and absent/identity content encoding. Duplicate names are checked before converting the entry list into a business object. `_bc_csrf` is the protocol token; the generic handler does not accept an order `_bc_request` intent key.
+Body reads are bounded even without `Content-Length`. The wrapper accepts only UTF-8 URL encoding and absent/identity content encoding. Duplicate names are checked before converting the entry list into a business object. `_bc_csrf` is the protocol token. `_bc_request` is rejected by default; opt in with definition `protocol: { requestKey: 'required' }` for source-verified Doctor parity, or handler `acceptRequestKey: true`. The host selects a generic idempotency store; this does not create an order intent.
 
 ## `createFormHandler(form, options)`
 

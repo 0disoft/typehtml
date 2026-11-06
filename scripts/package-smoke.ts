@@ -41,7 +41,7 @@ async function consumer(directory: string, manager: 'npm' | 'bun'): Promise<void
   const installed = join(directory, 'node_modules/@0disoft/typehtml');
   const packageInfo = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'));
   expect(packageInfo.version === manifest.version, `${manager}: installed package version differs`);
-  for (const unwanted of ['typescript', '@types/bun', '@types/node']) {
+  for (const unwanted of ['typescript', '@types/bun', '@types/node', 'zod', 'valibot', 'arktype']) {
     let exists = false;
     try { await access(join(directory, 'node_modules', unwanted)); exists = true; } catch { /* absent is expected */ }
     expect(!exists, `${manager}: package leaked development dependency ${unwanted}`);
@@ -63,6 +63,12 @@ async function consumer(directory: string, manager: 'npm' | 'bun'): Promise<void
     const result = JSON.parse(await run(`${manager}/${runtime} imports and native handler`, [executable!, 'portable.mjs'], directory));
     expect(result.success === 303 && result.invalid === 422 && result.csrf === 403 && result.executions === 1, `${manager}/${runtime}: handler protocol mismatch`);
     checks.push(`${manager}/${runtime}: root+contract+doctor+runtime imports, handler 303/422/403, CLI`);
+  }
+  await access(join(installed, 'docs/FORM_INTEGRATIONS.md'));
+  await writeFile(join(directory, 'extended.mjs'), EXTENDED_PROBE);
+  for (const [runtime, executable] of [['node', node], ['bun', bun]] as const) {
+    expect(JSON.parse(await run(`${manager}/${runtime} extended native forms`, [executable!, 'extended.mjs'], directory)).passed === true, `${manager}/${runtime}: extended form mismatch`);
+    checks.push(`${manager}/${runtime}: schema forms, nested/repeated/boolean input, CSRF, replay, adapters and Node sockets`);
   }
   await writeFile(join(directory, 'reference.mjs'), REFERENCE_PROBE);
   expect(JSON.parse(await run(`${manager} Node reference rejection`, [node!, 'reference.mjs'], directory)).unsupported === true, `${manager}: Node reference did not reject`);
@@ -106,6 +112,8 @@ async function starter(directory: string, installedCli: string): Promise<void> {
   const report = JSON.parse(await run('starter Node Doctor', [node!, cli, 'doctor', '--config', 'doctor.config.json'], directory));
   expect(report.exitCode === 0 && report.scope.paths === 1 && report.findings.length === 0, 'starter Doctor did not verify its form');
   checks.push('standalone init: Node generation/check, source hashes, Doctor 1 path/0 findings');
+  const sarif = JSON.parse(await run('installed Node Doctor SARIF', [node!, cli, 'doctor', '--config', 'doctor.config.json', '--format', 'sarif'], directory));
+  expect(sarif.version === '2.1.0' && sarif.runs.length === 1, 'installed Doctor SARIF mismatch');
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const server = Bun.spawn([bun, 'server.ts'], {
@@ -219,17 +227,65 @@ console.log(JSON.stringify({ success: success.status, invalid: invalid.status, c
 
 const REFERENCE_PROBE = `if (!process.versions.bun) {
   try { await import('@0disoft/typehtml/reference/order'); throw new Error('reference unexpectedly imported on Node'); }
+  catch (error) { if (!String(error).includes('requires Bun')) throw error; }
+  try { await import('@0disoft/typehtml/sqlite/idempotency'); throw new Error('SQLite unexpectedly imported on Node'); }
   catch (error) { if (!String(error).includes('requires Bun')) throw error; console.log(JSON.stringify({ unsupported: true })); }
 } else {
   const { loadReferenceOrderContract, SqliteOrderStore } = await import('@0disoft/typehtml/reference/order');
   const loaded = await loadReferenceOrderContract();
   if (loaded.contract.id !== 'orders.createDraft') throw new Error('bundled reference contract unavailable');
   const store = new SqliteOrderStore(':memory:');
-  try { console.log(JSON.stringify({ intents: store.countIntents() })); } finally { store.close(); }
+  try {
+    const { SqliteIdempotencyStore } = await import('@0disoft/typehtml/sqlite/idempotency');
+    const { createIdempotencyKey, idempotencyDigest } = await import('@0disoft/typehtml');
+    const idempotency = new SqliteIdempotencyStore(':memory:');
+    try {
+      let effects = 0;
+      const operation = { scope:'consumer',key:createIdempotencyKey(),inputDigest:idempotencyDigest({}),authorize:()=>true,execute:()=>{effects++;return {ok:true}} };
+      idempotency.executeAtomic(operation);
+      if (!idempotency.executeAtomic(operation).replayed || effects !== 1) throw new Error('SQLite replay failed');
+      console.log(JSON.stringify({ intents: store.countIntents() }));
+    } finally { idempotency.close(); }
+  } finally { store.close(); }
 }
 `;
 
+const EXTENDED_PROBE = `import { createServer } from 'node:http';
+import { defineSchemaForm, createSchemaFormHandler, createSignedCsrf, InMemoryIdempotencyStore, createIdempotencyKey, executeIdempotent, idempotencyDigest, getSchemaFieldProps, createFormState } from '@0disoft/typehtml';
+import { toHono, toAstro, toReactRouter, toSvelteKit } from '@0disoft/typehtml/adapters/web';
+import { toNodeListener, toExpress, createFastifyRoute } from '@0disoft/typehtml/adapters/node';
+const origin='https://consumer.invalid';
+const identity={'~standard':{version:1,vendor:'consumer',validate:(value)=>({value})}};
+const form=defineSchemaForm({id:'consumer.rich',path:'/submit',protocol:{requestKey:'required'},fields:{'person.name':{type:'string',required:true,minLength:1},tags:{type:'array',items:{type:'string'},maxItems:3},accepted:{type:'boolean'},count:{type:'integer',minimum:1}},input:identity,output:identity});
+const csrf=createSignedCsrf({secret:new Uint8Array(32).fill(9)});
+const store=new InMemoryIdempotencyStore();const key=createIdempotencyKey();let effects=0;
+const handle=createSchemaFormHandler(form,{allowedOrigins:[origin],authenticate:()=>({id:'p'}),csrfToken:()=>csrf.issue('p'),verifyCsrf:({token})=>csrf.verify(token,'p'),authorize:()=>true,execute:async({input,requestKey,request})=>(await executeIdempotent({store,scope:'p:rich',key:requestKey,inputDigest:idempotencyDigest(input),authorize:()=>true,signal:request.signal,execute:()=>{effects++;if(input.person.name!=='Ada'||input.tags.join(',')!=='b,a,b'||input.accepted!==false)throw new Error('decode mismatch');return {message:'ok'}}})).value,project:(value)=>value,success:()=>({location:'/done'})});
+const body=(count='2')=>new URLSearchParams([['_bc_csrf',csrf.issue('p')],['_bc_request',key],['person.name','Ada'],['tags','b'],['tags','a'],['tags','b'],['count',count]]);
+const request=(count)=>new Request(origin+'/submit',{method:'POST',headers:{origin,'content-type':'application/x-www-form-urlencoded'},body:body(count)});
+if((await handle(request('0'))).status!==422)throw new Error('missing 422');
+for(const adapter of [toAstro(handle),toReactRouter(handle),toSvelteKit(handle)])if((await adapter({request:request('2')})).status!==303)throw new Error('web adapter');
+if((await toHono(handle)({req:{raw:request('2')}})).status!==303||effects!==1)throw new Error('replay');
+if(typeof toExpress!=='function'||typeof createFastifyRoute!=='function')throw new Error('node exports');
+if(!getSchemaFieldProps(form,'person.name',{state:createFormState({},[])}).required)throw new Error('props');
+const server=createServer(toNodeListener(handle,{origin}));
+await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve)});
+try{const port=server.address().port;const response=await fetch('http://127.0.0.1:'+port+'/submit',{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/x-www-form-urlencoded'},body:body(),signal:AbortSignal.timeout(5000)});if(response.status!==303||effects!==1)throw new Error('Node socket integration');await response.arrayBuffer();}
+finally{server.closeAllConnections?.();await new Promise((resolve,reject)=>server.close((error)=>error?reject(error):resolve()));}
+console.log(JSON.stringify({passed:true}));
+`;
+
 const TYPE_PROBE = `import { defineForm, createFormHandler, type InferInput } from '@0disoft/typehtml';
+import { defineSchemaForm, createSchemaFormHandler, type StandardSchemaV1, type SchemaFormInput } from '@0disoft/typehtml';
+import { toHono, toAstro } from '@0disoft/typehtml/adapters/web';
+import { collectRenderedHtml, doctorToSarif, runDoctorLanguageServer } from '@0disoft/typehtml/doctor';
+void collectRenderedHtml;void doctorToSarif;void runDoctorLanguageServer;
+const schema: StandardSchemaV1<unknown,{name:string}> = {'~standard':{version:1,vendor:'consumer',validate:(value)=>({value:value as {name:string}})}};
+const rich=defineSchemaForm({id:'typed.rich',path:'/rich',fields:{name:{type:'string',required:true}},input:schema,output:schema});
+const richValue: SchemaFormInput<typeof rich>={name:'Ada'};
+// @ts-expect-error vendor schema output inference must remain precise
+const badRich: SchemaFormInput<typeof rich>={name:2};
+const richHandler=createSchemaFormHandler(rich,{allowedOrigins:['https://consumer.invalid'],authenticate:()=>({id:'p'}),csrfToken:()=>'token',authorize:({input})=>input.name.length>0,execute:({input})=>input,project:(input)=>input,success:()=>({location:'/done'})});
+toHono(richHandler);toAstro(richHandler);void richValue;
 const form = defineForm({ id: 'typed.submit', path: '/typed', input: { type: 'object', additionalProperties: false, required: ['name', 'quantity'], properties: { name: { type: 'string' }, quantity: { type: 'integer' }, choice: { type: 'string', enum: ['yes', 'no'] } } }, output: { type: 'object', additionalProperties: false, required: ['message'], properties: { message: { type: 'string' } } } });
 const valid: InferInput<typeof form> = { name: 'Ada', quantity: 2, choice: 'yes' };
 // @ts-expect-error the integer codec exposes decoded numbers, not wire strings
