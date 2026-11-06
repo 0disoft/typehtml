@@ -69,6 +69,137 @@ function withinRoot(rootDir: string, candidate: string): string {
   return absolute;
 }
 
+const ALLOWED_RULE_GROUPS: readonly CoverageRow['ruleGroup'][] = ['binding', 'target', 'supply', 'cardinality', 'constraints', 'runtime-security', 'bypass'];
+const DEFAULT_REQUIRED_RULE_GROUPS = ['binding', 'target', 'supply', 'cardinality'] as const;
+
+function parseInputs(value: JsonValue | undefined): DoctorInputConfig[] {
+  const inputs = array(value, '$.inputs').map((item, index): DoctorInputConfig => {
+    const entry = object(item, `$.inputs[${index}]`);
+    if (entry.kind !== 'form-projection') {
+      throw new DoctorConfigError('CONFIG_INPUT_KIND', 'only form-projection inputs are supported');
+    }
+    return { kind: 'form-projection', path: string(entry.path, `$.inputs[${index}].path`) };
+  });
+  if (inputs.length === 0) throw new DoctorConfigError('CONFIG_INPUTS', 'at least one form projection is required');
+  return inputs;
+}
+
+function parseBinding(item: JsonValue, path: string): DoctorBindingConfig {
+  const value = object(item, path);
+  const policy = string(value.submitterPolicy ?? 'enumerate-native', `${path}.submitterPolicy`);
+  if (policy !== 'enumerate-native' && policy !== 'implicit-only') {
+    throw new DoctorConfigError('CONFIG_SUBMITTER_POLICY', 'unsupported submitterPolicy');
+  }
+  return {
+    formId: string(value.formId, `${path}.formId`),
+    actionId: string(value.actionId, `${path}.actionId`),
+    required: boolean(value.required ?? true, `${path}.required`),
+    submitterPolicy: policy,
+    constraintMismatchSeverity: severity(value.constraintMismatchSeverity ?? 'warning', `${path}.constraintMismatchSeverity`),
+  };
+}
+
+function parseDocument(item: JsonValue, index: number): DoctorDocumentConfig {
+  const path = `$.documents[${index}]`;
+  const entry = object(item, path);
+  const bindings = array(entry.bindings, `${path}.bindings`).map((binding, bindingIndex) => parseBinding(binding, `${path}.bindings[${bindingIndex}]`));
+  const documentUrl = string(entry.documentUrl, `${path}.documentUrl`);
+  try {
+    const url = new URL(documentUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('not http');
+  } catch {
+    throw new DoctorConfigError('CONFIG_DOCUMENT_URL', `invalid documentUrl: ${documentUrl}`);
+  }
+  return {
+    path: string(entry.path, `${path}.path`),
+    documentUrl,
+    sourceKind: string(entry.sourceKind, `${path}.sourceKind`),
+    executionAssumption: string(entry.executionAssumption, `${path}.executionAssumption`),
+    bindings,
+  };
+}
+
+function parseDocuments(value: JsonValue | undefined): DoctorDocumentConfig[] {
+  const documents = array(value, '$.documents').map(parseDocument);
+  if (documents.length === 0) throw new DoctorConfigError('CONFIG_DOCUMENTS', 'at least one document is required');
+  if (documents.every((document) => document.bindings.length === 0)) {
+    throw new DoctorConfigError('CONFIG_ZERO_BINDINGS', 'explicit bindings are required');
+  }
+  return documents;
+}
+
+function parseAudit(value: JsonValue | undefined): Pick<DoctorConfig, 'releaseRequiresCompleteDeclaredBoundary' | 'releaseRequiredRuleGroups'> {
+  const audit = value === undefined ? undefined : object(value, '$.audit');
+  const requiredGroups = audit?.releaseRequiredRuleGroups === undefined
+    ? [...DEFAULT_REQUIRED_RULE_GROUPS]
+    : array(audit.releaseRequiredRuleGroups, '$.audit.releaseRequiredRuleGroups').map((item) => {
+      const name = string(item, '$.audit.releaseRequiredRuleGroups[]');
+      if (!ALLOWED_RULE_GROUPS.includes(name as CoverageRow['ruleGroup'])) throw new DoctorConfigError('CONFIG_RULE_GROUP', `unknown required rule group ${name}`);
+      return name as CoverageRow['ruleGroup'];
+    });
+  return {
+    releaseRequiresCompleteDeclaredBoundary: boolean(audit?.releaseRequiresCompleteDeclaredBoundary ?? true, '$.audit.releaseRequiresCompleteDeclaredBoundary'),
+    releaseRequiredRuleGroups: requiredGroups,
+  };
+}
+
+async function readProjection(baseDir: string, realBaseDir: string, input: DoctorInputConfig): Promise<FormCheck> {
+  const lexicalPath = withinRoot(baseDir, resolve(baseDir, input.path));
+  let path: string;
+  try {
+    path = await realpath(lexicalPath);
+  } catch (error) {
+    throw new DoctorConfigError('CONFIG_INPUT_UNREADABLE', error instanceof Error ? error.message : 'cannot read form projection');
+  }
+  withinRoot(realBaseDir, path);
+  if ((await stat(path)).size > MAX_DOCUMENT_BYTES) throw new DoctorConfigError('CONFIG_INPUT_TOO_LARGE', 'form projection exceeds the file size limit');
+  try {
+    return (await loadFormCheck(path)).formCheck;
+  } catch (error) {
+    throw new DoctorConfigError('CONFIG_FORM_CHECK', error instanceof Error ? error.message : 'cannot load form projection');
+  }
+}
+
+async function sourceIssue(baseDir: string, realBaseDir: string, check: FormCheck): Promise<string | null> {
+  try {
+    const sourcePath = withinRoot(baseDir, resolve(baseDir, check.source.path));
+    const realSourcePath = await realpath(sourcePath);
+    withinRoot(realBaseDir, realSourcePath);
+    if ((await stat(realSourcePath)).size > MAX_DOCUMENT_BYTES) throw new Error('authoritative source exceeds the file size limit');
+    const source = await readStrictJson(realSourcePath, { integerOnly: true });
+    if (source !== null && typeof source === 'object' && !Array.isArray(source) && source.format === FORM_FORMAT) {
+      verifyFormSource(check, await loadForm(realSourcePath));
+    } else {
+      verifyFormCheckSource(check, await loadBoundaryContract(realSourcePath));
+    }
+    return null;
+  } catch (error) {
+    if (error instanceof DoctorConfigError) throw error;
+    return error instanceof Error ? error.message : 'authoritative source cannot be verified';
+  }
+}
+
+async function loadProjections(baseDir: string, inputs: readonly DoctorInputConfig[]) {
+  const formChecks = new Map<string, FormCheck>();
+  const sourceIssues = new Map<string, string>();
+  let realBaseDir: string;
+  try {
+    realBaseDir = await realpath(baseDir);
+  } catch (error) {
+    throw new DoctorConfigError('CONFIG_ROOT_UNREADABLE', error instanceof Error ? error.message : 'cannot read Doctor root');
+  }
+  for (const input of inputs) {
+    const check = await readProjection(baseDir, realBaseDir, input);
+    if (formChecks.has(check.action.id)) {
+      throw new DoctorConfigError('CONFIG_DUPLICATE_ACTION', `duplicate form projection for ${check.action.id}`);
+    }
+    formChecks.set(check.action.id, check);
+    const issue = await sourceIssue(baseDir, realBaseDir, check);
+    if (issue !== null) sourceIssues.set(check.action.id, issue);
+  }
+  return { formChecks, sourceIssues };
+}
+
 export async function loadDoctorConfig(configPath: string): Promise<LoadedDoctorConfig> {
   const absoluteConfig = resolve(configPath);
   let value: JsonValue;
@@ -83,112 +214,16 @@ export async function loadDoctorConfig(configPath: string): Promise<LoadedDoctor
   }
   const rootPath = string(root.root ?? '.', '$.root');
   const baseDir = resolve(rootPath);
-  const inputs = array(root.inputs, '$.inputs').map((item, index): DoctorInputConfig => {
-    const entry = object(item, `$.inputs[${index}]`);
-    if (entry.kind !== 'form-projection') {
-      throw new DoctorConfigError('CONFIG_INPUT_KIND', 'only form-projection inputs are supported');
-    }
-    return { kind: 'form-projection', path: string(entry.path, `$.inputs[${index}].path`) };
-  });
-  if (inputs.length === 0) throw new DoctorConfigError('CONFIG_INPUTS', 'at least one form projection is required');
-  const formChecks = new Map<string, FormCheck>();
-  const sourceIssues = new Map<string, string>();
-  let realBaseDir: string;
-  try {
-    realBaseDir = await realpath(baseDir);
-  } catch (error) {
-    throw new DoctorConfigError('CONFIG_ROOT_UNREADABLE', error instanceof Error ? error.message : 'cannot read Doctor root');
-  }
-  for (const input of inputs) {
-    const lexicalPath = withinRoot(baseDir, resolve(baseDir, input.path));
-    let path: string;
-    try {
-      path = await realpath(lexicalPath);
-    } catch (error) {
-      throw new DoctorConfigError('CONFIG_INPUT_UNREADABLE', error instanceof Error ? error.message : 'cannot read form projection');
-    }
-    withinRoot(realBaseDir, path);
-    if ((await stat(path)).size > MAX_DOCUMENT_BYTES) throw new DoctorConfigError('CONFIG_INPUT_TOO_LARGE', 'form projection exceeds the file size limit');
-    let loaded;
-    try {
-      loaded = await loadFormCheck(path);
-    } catch (error) {
-      throw new DoctorConfigError('CONFIG_FORM_CHECK', error instanceof Error ? error.message : 'cannot load form projection');
-    }
-    if (formChecks.has(loaded.formCheck.action.id)) {
-      throw new DoctorConfigError('CONFIG_DUPLICATE_ACTION', `duplicate form projection for ${loaded.formCheck.action.id}`);
-    }
-    formChecks.set(loaded.formCheck.action.id, loaded.formCheck);
-    try {
-      const sourcePath = withinRoot(baseDir, resolve(baseDir, loaded.formCheck.source.path));
-      const realSourcePath = await realpath(sourcePath);
-      withinRoot(realBaseDir, realSourcePath);
-      if ((await stat(realSourcePath)).size > MAX_DOCUMENT_BYTES) throw new Error('authoritative source exceeds the file size limit');
-      const source = await readStrictJson(realSourcePath, { integerOnly: true });
-      if (source !== null && typeof source === 'object' && !Array.isArray(source) && source.format === FORM_FORMAT) {
-        verifyFormSource(loaded.formCheck, await loadForm(realSourcePath));
-      } else {
-        verifyFormCheckSource(loaded.formCheck, await loadBoundaryContract(realSourcePath));
-      }
-    } catch (error) {
-      if (error instanceof DoctorConfigError) throw error;
-      sourceIssues.set(loaded.formCheck.action.id, error instanceof Error ? error.message : 'authoritative source cannot be verified');
-    }
-  }
-  const documents = array(root.documents, '$.documents').map((item, index): DoctorDocumentConfig => {
-    const entry = object(item, `$.documents[${index}]`);
-    const bindings = array(entry.bindings, `$.documents[${index}].bindings`).map((binding, bindingIndex): DoctorBindingConfig => {
-      const value = object(binding, `$.documents[${index}].bindings[${bindingIndex}]`);
-      const policy = string(value.submitterPolicy ?? 'enumerate-native', `$.documents[${index}].bindings[${bindingIndex}].submitterPolicy`);
-      if (policy !== 'enumerate-native' && policy !== 'implicit-only') {
-        throw new DoctorConfigError('CONFIG_SUBMITTER_POLICY', 'unsupported submitterPolicy');
-      }
-      return {
-        formId: string(value.formId, `$.documents[${index}].bindings[${bindingIndex}].formId`),
-        actionId: string(value.actionId, `$.documents[${index}].bindings[${bindingIndex}].actionId`),
-        required: boolean(value.required ?? true, `$.documents[${index}].bindings[${bindingIndex}].required`),
-        submitterPolicy: policy,
-        constraintMismatchSeverity: severity(
-          value.constraintMismatchSeverity ?? 'warning',
-          `$.documents[${index}].bindings[${bindingIndex}].constraintMismatchSeverity`,
-        ),
-      };
-    });
-    const documentUrl = string(entry.documentUrl, `$.documents[${index}].documentUrl`);
-    try {
-      const url = new URL(documentUrl);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('not http');
-    } catch {
-      throw new DoctorConfigError('CONFIG_DOCUMENT_URL', `invalid documentUrl: ${documentUrl}`);
-    }
-    return {
-      path: string(entry.path, `$.documents[${index}].path`),
-      documentUrl,
-      sourceKind: string(entry.sourceKind, `$.documents[${index}].sourceKind`),
-      executionAssumption: string(entry.executionAssumption, `$.documents[${index}].executionAssumption`),
-      bindings,
-    };
-  });
-  if (documents.length === 0) throw new DoctorConfigError('CONFIG_DOCUMENTS', 'at least one document is required');
-  if (documents.every((document) => document.bindings.length === 0)) {
-    throw new DoctorConfigError('CONFIG_ZERO_BINDINGS', 'explicit bindings are required');
-  }
-  const audit = root.audit === undefined ? undefined : object(root.audit, '$.audit');
-  const allowedRuleGroups: readonly CoverageRow['ruleGroup'][] = ['binding', 'target', 'supply', 'cardinality', 'constraints', 'runtime-security', 'bypass'];
-  const requiredGroups = audit?.releaseRequiredRuleGroups === undefined
-    ? ['binding', 'target', 'supply', 'cardinality'] as const
-    : array(audit.releaseRequiredRuleGroups, '$.audit.releaseRequiredRuleGroups').map((item) => {
-      const name = string(item, '$.audit.releaseRequiredRuleGroups[]');
-      if (!allowedRuleGroups.includes(name as CoverageRow['ruleGroup'])) throw new DoctorConfigError('CONFIG_RULE_GROUP', `unknown required rule group ${name}`);
-      return name as CoverageRow['ruleGroup'];
-    });
+  const inputs = parseInputs(root.inputs);
+  const { formChecks, sourceIssues } = await loadProjections(baseDir, inputs);
+  const documents = parseDocuments(root.documents);
+  const audit = parseAudit(root.audit);
   const config: DoctorConfig = {
     format: 'boundary-doctor/0.5-draft',
     root: rootPath,
     inputs,
     documents,
-    releaseRequiresCompleteDeclaredBoundary: boolean(audit?.releaseRequiresCompleteDeclaredBoundary ?? true, '$.audit.releaseRequiresCompleteDeclaredBoundary'),
-    releaseRequiredRuleGroups: requiredGroups,
+    ...audit,
   };
   return { config, configPath: absoluteConfig, baseDir, formChecks, sourceIssues };
 }
