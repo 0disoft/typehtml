@@ -78,7 +78,55 @@ export interface RequestRateLimiter {
 export class RateLimitError extends Error {
   readonly status = 429;
   readonly code = 'RATE_LIMITED';
-  constructor(readonly retryAfterSeconds: number) { super('request rate limit exceeded'); this.name = 'RateLimitError'; }
+  constructor(readonly retryAfterSeconds: number) {
+    super('request rate limit exceeded'); positiveInteger(retryAfterSeconds, 'retry-after'); this.name = 'RateLimitError';
+  }
+}
+
+export class RateLimitUnavailableError extends Error {
+  readonly status = 503;
+  readonly code = 'RATE_LIMIT_UNAVAILABLE';
+  constructor(options?: ErrorOptions) { super('request rate limit service unavailable', options); this.name = 'RateLimitUnavailableError'; }
+}
+
+/** Bounds remote adapters even when they ignore their signal; failures are never treated as permission. */
+export async function consumeRateLimit(
+  limiter: RequestRateLimiter, key: string, options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }> = {},
+): Promise<RequestRateLimitDecision> {
+  const { signal } = options;
+  signal?.throwIfAborted();
+  if (typeof key !== 'string' || key.length === 0 || key.length > 4096) throw new TypeError('invalid rate limit key');
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) throw new RangeError('invalid rate limit timeout');
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal!.reason);
+  signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(new RateLimitUnavailableError({
+    cause: new DOMException('rate limit operation exceeded its deadline', 'TimeoutError'),
+  })), timeoutMs);
+  let stop: (() => void) | undefined;
+  try {
+    const pending = limiter.consume(key, controller.signal);
+    const decision = await new Promise<RequestRateLimitDecision>((resolve, reject) => {
+      stop = () => reject(controller.signal.reason);
+      controller.signal.addEventListener('abort', stop, { once: true });
+      Promise.resolve(pending).then(resolve, reject);
+      if (controller.signal.aborted) stop();
+    });
+    signal?.throwIfAborted();
+    if (decision === null || typeof decision !== 'object' || typeof decision.allow !== 'boolean') throw new TypeError('invalid rate limit decision');
+    if (decision.allow) return Object.freeze({ allow: true });
+    positiveInteger(decision.retryAfterSeconds, 'retry-after');
+    return Object.freeze({ allow: false, retryAfterSeconds: decision.retryAfterSeconds });
+  } catch (cause) {
+    signal?.throwIfAborted();
+    if (cause instanceof RateLimitUnavailableError) throw cause;
+    throw new RateLimitUnavailableError({ cause });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+    if (stop !== undefined) controller.signal.removeEventListener('abort', stop);
+  }
 }
 
 /** Bounded fixed windows, local to this process. Use a shared atomic store across replicas. */
@@ -124,12 +172,10 @@ export class InMemoryRateLimiter implements RequestRateLimiter {
   }
 }
 
-export async function assertRateLimit(limiter: RequestRateLimiter, key: string, signal?: AbortSignal): Promise<void> {
-  signal?.throwIfAborted();
-  const decision = await limiter.consume(key, signal);
-  signal?.throwIfAborted();
-  if (decision === null || typeof decision !== 'object' || typeof decision.allow !== 'boolean') throw new TypeError('invalid rate limit decision');
+export async function assertRateLimit(
+  limiter: RequestRateLimiter, key: string, signal?: AbortSignal, options: Readonly<{ timeoutMs?: number }> = {},
+): Promise<void> {
+  const decision = await consumeRateLimit(limiter, key, { ...options, signal });
   if (decision.allow) return;
-  positiveInteger(decision.retryAfterSeconds, 'retry-after');
   throw new RateLimitError(decision.retryAfterSeconds);
 }
