@@ -37,6 +37,15 @@ describe('durable generic SQLite idempotency', () => {
     finally { b.close(); }
   });
 
+  it('rejects ill-formed UTF-16 scopes before SQLite replaces them with one UTF-8 identity', () => {
+    const store = new SqliteIdempotencyStore(':memory:');
+    try {
+      expect(() => store.claim({ ...claim, scope: 'tenant\ud800' })).toThrow('scope');
+      expect(() => store.claim({ ...claim, scope: 'tenant\ud801' })).toThrow('scope');
+      expect(store.claim({ ...claim, scope: 'tenant/한/😀' }).status).toBe('claimed');
+    } finally { store.close(); }
+  });
+
   it('commits same-database business writes and replay records in one transaction', async () => {
     const file = await filename(); const store = new SqliteIdempotencyStore(file); let executions = 0; let authorizations = 0;
     const options = { ...claim, now: () => 100, authorize: () => { authorizations++; return true; }, execute: (db: import('bun:sqlite').Database) => {

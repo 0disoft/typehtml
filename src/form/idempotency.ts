@@ -30,7 +30,8 @@ export class IdempotencyError extends Error {
 }
 
 export function assertIdempotencyIdentity(identity: IdempotencyIdentity): void {
-  if (typeof identity.scope !== 'string' || identity.scope.length === 0 || identity.scope.length > 4096) throw new TypeError('invalid idempotency scope');
+  // UTF-8 stores replace lone surrogates, which would merge distinct JavaScript scopes.
+  if (typeof identity.scope !== 'string' || identity.scope.length === 0 || identity.scope.length > 4096 || !identity.scope.isWellFormed()) throw new TypeError('invalid idempotency scope');
   if (typeof identity.key !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(identity.key)) throw new TypeError('invalid idempotency key');
   if (typeof identity.inputDigest !== 'string' || !/^[a-f0-9]{64}$/.test(identity.inputDigest)) throw new TypeError('invalid idempotency input digest');
 }
@@ -44,44 +45,59 @@ export function assertIdempotencyClaim(claim: IdempotencyClaim): void {
 /** Bounded canonical JSON; rejects lossy values, accessors and cycles before running any business effect. */
 export function encodeIdempotencyValue(value: unknown): string {
   const ancestors = new Set<object>();
+  const parts: string[] = [];
+  let remainingBytes = 65_536;
   let nodes = 0;
-  const visit = (item: unknown, depth: number): string => {
+  const append = (part: string): void => {
+    const bytes = Buffer.byteLength(part);
+    if (bytes > remainingBytes) throw new RangeError('idempotency JSON exceeds 64 KiB');
+    remainingBytes -= bytes;
+    parts.push(part);
+  };
+  const string = (item: string): void => {
+    // JSON encoding cannot use fewer bytes than UTF-16 units, so reject huge keys before stringify.
+    if (item.length > remainingBytes) throw new RangeError('idempotency JSON exceeds 64 KiB');
+    append(JSON.stringify(item));
+  };
+  const visit = (item: unknown, depth: number): void => {
     if (++nodes > 10_000 || depth > 32) throw new RangeError('idempotency JSON is too complex');
-    if (item === null || typeof item === 'boolean') return String(item);
-    if (typeof item === 'string') {
-      if (item.length > 65_536) throw new RangeError('idempotency JSON exceeds 64 KiB');
-      return JSON.stringify(item);
-    }
+    if (item === null || typeof item === 'boolean') { append(String(item)); return; }
+    if (typeof item === 'string') { string(item); return; }
     if (typeof item === 'number') {
       if (!Number.isFinite(item) || Object.is(item, -0)) throw new TypeError('idempotency JSON requires finite numbers without negative zero');
-      return JSON.stringify(item);
+      append(JSON.stringify(item)); return;
     }
     if (typeof item !== 'object' || ancestors.has(item)) throw new TypeError('idempotency value must be acyclic JSON');
     if (Object.getOwnPropertySymbols(item).length > 0) throw new TypeError('idempotency JSON cannot contain symbol keys');
     ancestors.add(item);
     try {
       if (Array.isArray(item)) {
-        const parts: string[] = [];
+        append('[');
         for (let i = 0; i < item.length; i++) {
           const descriptor = Object.getOwnPropertyDescriptor(item, String(i));
           if (descriptor === undefined || !('value' in descriptor)) throw new TypeError('idempotency JSON cannot contain array holes or accessors');
-          parts.push(visit(descriptor.value, depth + 1));
+          if (i > 0) append(',');
+          visit(descriptor.value, depth + 1);
         }
         if (Object.keys(item).some((key) => !/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= item.length)) throw new TypeError('idempotency arrays cannot have named properties');
-        return `[${parts.join(',')}]`;
+        append(']'); return;
       }
       const proto = Object.getPrototypeOf(item);
       if (proto !== Object.prototype && proto !== null) throw new TypeError('idempotency JSON requires plain objects');
-      return `{${Object.keys(item).sort().map((key) => {
+      append('{');
+      let first = true;
+      for (const key of Object.keys(item).sort()) {
         const descriptor = Object.getOwnPropertyDescriptor(item, key)!;
         if (!('value' in descriptor)) throw new TypeError('idempotency JSON cannot contain accessors');
-        return `${JSON.stringify(key)}:${visit(descriptor.value, depth + 1)}`;
-      }).join(',')}}`;
+        if (!first) append(',');
+        first = false;
+        string(key); append(':'); visit(descriptor.value, depth + 1);
+      }
+      append('}');
     } finally { ancestors.delete(item); }
   };
-  const json = visit(value, 0);
-  if (new TextEncoder().encode(json).length > 65_536) throw new RangeError('idempotency JSON exceeds 64 KiB');
-  return json;
+  visit(value, 0);
+  return parts.join('');
 }
 
 export function idempotencyDigest(input: unknown): string {

@@ -199,6 +199,32 @@ describe('atomic local store and bounded JSON', () => {
     expect(() => idempotencyField('<unsafe>')).toThrow();
   });
 
+  it('enforces the aggregate UTF-8 budget while encoding, before visiting later values', () => {
+    expect(encodeIdempotencyValue('a'.repeat(65_534)).length).toBe(65_536);
+    expect(() => encodeIdempotencyValue('a'.repeat(65_535))).toThrow('64 KiB');
+    expect(Buffer.byteLength(encodeIdempotencyValue({ x: 'a'.repeat(65_528) }))).toBe(65_536);
+    expect(() => encodeIdempotencyValue({ x: 'a'.repeat(65_529) })).toThrow('64 KiB');
+    expect(Buffer.byteLength(encodeIdempotencyValue('한'.repeat(21_844)))).toBe(65_534);
+    expect(() => encodeIdempotencyValue('한'.repeat(21_845))).toThrow('64 KiB');
+    expect(() => encodeIdempotencyValue({ ['x'.repeat(65_536)]: 0 })).toThrow('64 KiB');
+    const later = {}; let visits = 0;
+    const original = Object.getOwnPropertySymbols;
+    const inspected = spyOn(Object, 'getOwnPropertySymbols').mockImplementation((item) => {
+      if (item === later) visits++;
+      return original(item);
+    });
+    try {
+      expect(() => encodeIdempotencyValue(['a'.repeat(65_534), later])).toThrow('64 KiB');
+      expect(visits).toBe(0);
+    } finally { inspected.mockRestore(); }
+  });
+
+  it('rejects scopes that UTF-8 stores would conflate while retaining valid Unicode', () => {
+    const store = new InMemoryIdempotencyStore();
+    for (const scope of ['tenant\ud800', 'tenant\ud801', '\udc00']) expect(() => store.claim({ ...claim, scope })).toThrow('scope');
+    expect(store.claim({ ...claim, scope: 'tenant/한/😀' }).status).toBe('claimed');
+  });
+
   it('preserves the original failure if uncertainty marking also fails', async () => {
     const error = new Error('effect failure'); const store = new InMemoryIdempotencyStore();
     const input = { ...options(() => { throw error; }), store: {
