@@ -16,9 +16,9 @@
 
 | 명령 | 결과 |
 | --- | --- |
-| `bun test` | 25개 파일, 182개 테스트 통과, 실패 0, expect 681개 |
+| `bun test` | 40개 파일, 372개 테스트 통과, 실패 0, expect 2,969개 |
 | `bun run typecheck` | 통과. `scripts/`도 검사 대상에 포함 |
-| `bun run generate:check` | 기존 주문 참조 생성물 최신 상태 |
+| `bun run generate:check` | 이전 검증 결과 재사용. 이번 전체 테스트의 생성물 최신 상태 검사도 통과 |
 | `bun run pack` | ESM·타입 선언 빌드 후 설치용 tgz 생성 |
 | `bun run package:smoke` | 저장소 밖의 새 npm·Bun 소비자에서 10개 항목 통과 |
 | `git diff --check` | 통과 |
@@ -36,7 +36,9 @@
 
 최종 설치 파일: `artifacts/0disoft-typehtml-0.1.0-alpha.1.tgz`
 
-SHA-256: `c3e0015d83e7efe8d359bd59333c38c923558d4d32f6402db5af43c7f86048a8`
+SHA-256: `ed09d2ed6d25944c1bec6cac823513b0ba1f8c780a64fb95d5c4bdddad04763b`
+
+이번 성능 개선의 조건별 측정과 동작 변경은 [성능 확장성 검증](PERFORMANCE_SCALING.ko.md)에 기록했다.
 
 ## 남은 한계
 
