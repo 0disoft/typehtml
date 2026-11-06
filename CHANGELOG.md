@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.3 — Local regression fixes
+
+- Stop canceled requests before starting business effects after asynchronous guards.
+- Separate projected output-schema input from its transformed success type; retain nested repeated-field error links.
+- Preserve scalar radio values on invalid redisplay and generate required radio selection hints even for empty allowed values.
+- Enforce rendered HTML deadlines against elapsed monotonic time and snapshot render/fetch callbacks per collection.
+- Treat disabled checked radios as conditional required-field supply instead of falsely passing Doctor; assemble fragmented LSP frames in linear time.
+- Enforce idempotency JSON size during encoding and reject malformed Unicode scope identities before storage.
+- Check SQLite replay authorization inside the immediate transaction, retain callback snapshots, and reject bound asynchronous callbacks.
+- Retain local-only packaging; no npm publication.
+
 ## 0.1.0-alpha.2 — Local package
 
 - Preserve the flat-form API and share its request boundary with additive Standard Schema forms (Zod, Valibot, ArkType).

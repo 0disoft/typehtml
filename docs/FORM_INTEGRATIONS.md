@@ -1,6 +1,6 @@
 # Forms, framework integrations, and Doctor tooling
 
-This guide describes the additive `0.1.0-alpha.2` APIs. The existing `defineForm`, `createFormHandler`, JSON manifests, native 422 HTML responses, and successful 303 redirects remain supported. TypeHTML supplies a request boundary and diagnostics; your application supplies authentication, authorization, persistence, GET pages, and framework startup.
+This guide describes the additive `0.1.0-alpha.3` APIs. The existing `defineForm`, `createFormHandler`, JSON manifests, native 422 HTML responses, and successful 303 redirects remain supported. TypeHTML supplies a request boundary and diagnostics; your application supplies authentication, authorization, persistence, GET pages, and framework startup.
 
 The core, adapters, and Doctor run on Node.js 22+ and Bun 1.4+. The optional SQLite idempotency adapter requires Bun 1.4+. No validator library, application server, browser runtime, or reactive form model is bundled by the new form APIs.
 
@@ -9,9 +9,9 @@ The core, adapters, and Doctor run on Node.js 22+ and Bun 1.4+. The optional SQL
 Install the supplied archive in a consumer project. These commands install files; they do not publish to npm:
 
 ```sh
-npm install "./0disoft-typehtml-0.1.0-alpha.2.tgz" "zod@^4"
+npm install "./0disoft-typehtml-0.1.0-alpha.3.tgz" "zod@^4"
 # Or:
-bun add "./0disoft-typehtml-0.1.0-alpha.2.tgz" "zod@^4"
+bun add "./0disoft-typehtml-0.1.0-alpha.3.tgz" "zod@^4"
 ```
 
 Use an absolute archive path when the file is elsewhere. Zod is the example's application dependency. Valibot 1 and ArkType 2 Standard Schema implementations are also tested; install the validator you use rather than all three. TypeHTML does not load your validator library automatically.
@@ -29,6 +29,8 @@ Existing `/contract`, `/runtime`, and `/reference/order` entry points remain sep
 ## Define a Standard Schema form
 
 `fields` is the explicit URL-encoded transport allowlist and codec profile. `input` validates the decoded object and may transform it; business hooks receive the validator's output type. `output` validates the explicitly projected public result. Unknown request keys are rejected before a validator can silently strip them.
+
+When the output schema transforms data, `project` returns its input type (`InferStandardInput<typeof outputSchema>`), while `success` receives its validated, transformed output type. These types may differ. A cancellation observed before authorization or before business execution prevents a new effect from starting; an effect already running is not retried or rolled back by the generic boundary.
 
 ```ts
 // profile-form.ts
@@ -320,7 +322,11 @@ function insertProfileOnce(
   return store.executeAtomic({
     scope: `profile.insert:v1:${principal.userId}`,
     key, inputDigest: idempotencyDigest(input), signal,
-    authorize: () => principal.canCreateProfile === true,
+    authorize: (db) => {
+      const permission = db.query('SELECT can_create FROM profile_permissions WHERE user_id = ?')
+        .get(principal.userId) as { can_create: number } | null;
+      return permission?.can_create === 1;
+    },
     execute: (db) => {
       const row = db.query('INSERT INTO profile_updates (owner_id, name) VALUES (?, ?) RETURNING id')
         .get(principal.userId, input.user.name) as { id: number };
@@ -331,7 +337,7 @@ function insertProfileOnce(
 // Call store.close() when the host shuts down.
 ```
 
-The generic `claim`/`complete` interface can use this store too. `executeAtomic` is the stronger same-database path: synchronous authorization and business SQL, the uniqueness claim, and the saved result commit in one immediate SQLite transaction. Execute SQL only through the supplied transaction connection; callbacks must be synchronous. SQLite cannot roll back an external HTTP request, email, or payment. Use a transactional outbox and downstream idempotency for such effects. The generic asynchronous wrapper also cannot promise exactly-once behavior across a side effect and a crash before completion; it blocks uncertain keys instead of automatically retrying them.
+The application creates/migrates both tables in this example. The generic `claim`/`complete` interface can use this store too. `executeAtomic` is the stronger same-database path: synchronous authorization and business SQL, the uniqueness claim, and the saved result commit in one immediate SQLite transaction. `authorize(db)` runs inside that transaction before claiming or replaying a key; keep it read-only and query current permissions through the supplied connection. Existing zero-argument authorization callbacks remain compatible. Execute business SQL through the same supplied transaction connection; callbacks must be synchronous. SQLite cannot roll back an external HTTP request, email, or payment. Use a transactional outbox and downstream idempotency for such effects. The generic asynchronous wrapper also cannot promise exactly-once behavior across a side effect and a crash before completion; it blocks uncertain keys instead of automatically retrying them.
 
 ## Static Doctor profiles for schema forms
 

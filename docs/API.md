@@ -1,6 +1,6 @@
 # Public API
 
-The `0.1.0-alpha.2` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
+The `0.1.0-alpha.3` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
 
 | Entry point | Purpose | Runtime |
 | --- | --- | --- |

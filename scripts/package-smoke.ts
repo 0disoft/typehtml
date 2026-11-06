@@ -267,6 +267,11 @@ for(const adapter of [toAstro(handle),toReactRouter(handle),toSvelteKit(handle)]
 if((await toHono(handle)({req:{raw:request('2')}})).status!==303||effects!==1)throw new Error('replay');
 if(typeof toExpress!=='function'||typeof createFastifyRoute!=='function')throw new Error('node exports');
 if(!getSchemaFieldProps(form,'person.name',{state:createFormState({},[])}).required)throw new Error('props');
+const outputTransform={'~standard':{version:1,vendor:'consumer',validate:(value)=>typeof value?.count==='string'?{value:{count:Number(value.count)}}:{issues:[{message:'expected projected string count'}]}}};
+const transformed=defineSchemaForm({id:'consumer.transformed',path:'/transformed',fields:{name:{type:'string'}},input:identity,output:outputTransform});
+const transformedHandler=createSchemaFormHandler(transformed,{allowedOrigins:[origin],authenticate:()=>({}),csrfToken:()=>'token',authorize:()=>true,execute:()=>({count:'2'}),project:(value)=>value,success:(output)=>({location:'/done?count='+output.count.toFixed(0)})});
+const transformedResponse=await transformedHandler(new Request(origin+'/transformed',{method:'POST',headers:{origin,'content-type':'application/x-www-form-urlencoded'},body:'_bc_csrf=token&name=Ada'}));
+if(transformedResponse.status!==303||transformedResponse.headers.get('location')!=='/done?count=2')throw new Error('output transformation mismatch');
 const server=createServer(toNodeListener(handle,{origin}));
 await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve)});
 try{const port=server.address().port;const response=await fetch('http://127.0.0.1:'+port+'/submit',{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/x-www-form-urlencoded'},body:body(),signal:AbortSignal.timeout(5000)});if(response.status!==303||effects!==1)throw new Error('Node socket integration');await response.arrayBuffer();}
@@ -286,6 +291,9 @@ const richValue: SchemaFormInput<typeof rich>={name:'Ada'};
 const badRich: SchemaFormInput<typeof rich>={name:2};
 const richHandler=createSchemaFormHandler(rich,{allowedOrigins:['https://consumer.invalid'],authenticate:()=>({id:'p'}),csrfToken:()=>'token',authorize:({input})=>input.name.length>0,execute:({input})=>input,project:(input)=>input,success:()=>({location:'/done'})});
 toHono(richHandler);toAstro(richHandler);void richValue;
+const outputTransform: StandardSchemaV1<{count:string},{count:number}>={'~standard':{version:1,vendor:'consumer',validate:(value)=>({value:{count:Number((value as {count:string}).count)}})}};
+const transformed=defineSchemaForm({id:'typed.transform',path:'/transform',fields:{name:{type:'string'}},input:schema,output:outputTransform});
+createSchemaFormHandler(transformed,{allowedOrigins:['https://consumer.invalid'],authenticate:()=>({}),csrfToken:()=>'token',authorize:()=>true,execute:()=>({count:'2'}),project:(value)=>value,success:({count})=>({location:'/done?count='+count.toFixed(0)})});
 const form = defineForm({ id: 'typed.submit', path: '/typed', input: { type: 'object', additionalProperties: false, required: ['name', 'quantity'], properties: { name: { type: 'string' }, quantity: { type: 'integer' }, choice: { type: 'string', enum: ['yes', 'no'] } } }, output: { type: 'object', additionalProperties: false, required: ['message'], properties: { message: { type: 'string' } } } });
 const valid: InferInput<typeof form> = { name: 'Ada', quantity: 2, choice: 'yes' };
 // @ts-expect-error the integer codec exposes decoded numbers, not wire strings
