@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -63,6 +63,31 @@ describe('explicit rendered HTML capture', () => {
     controller.abort(reason);
     await expect(collectRenderedHtml({ ...options, signal: controller.signal, render: () => 'unused' })).rejects.toBe(reason);
     await expect(collectRenderedHtml({ ...options, timeoutMs: 10, render: () => new Promise(() => {}) })).rejects.toHaveProperty('name', 'TimeoutError');
+  });
+
+  test.each([4, 5, 6])('checks the exclusive deadline after a ready renderer at %ims', async (elapsed) => {
+    let measured = 0;
+    const now = spyOn(performance, 'now').mockImplementation(() => measured);
+    try {
+      const capture = collectRenderedHtml({ ...options, timeoutMs: 5, render: () => { measured = elapsed; return '<form></form>'; } });
+      if (elapsed < 5) await expect(capture).resolves.toBeDefined();
+      else await expect(capture).rejects.toHaveProperty('name', 'TimeoutError');
+    } finally { now.mockRestore(); }
+  });
+
+  test('captures callback references before asynchronous selected states can change host options', async () => {
+    const calls: string[] = [];
+    const mutable = {
+      ...options, selections: [selection('one'), selection('two')], concurrency: 1,
+      render: (state: RenderedSnapshotSelection) => {
+        calls.push(state.id);
+        mutable.render = () => '<p>replacement</p>';
+        return `<p>${state.id}</p>`;
+      },
+    };
+    const collection = await collectRenderedHtml(mutable);
+    expect(calls).toEqual(['one', 'two']);
+    expect(collection.snapshots.map((snapshot) => snapshot.html)).toEqual(['<p>one</p>', '<p>two</p>']);
   });
 
   test('cancels streamed resources after byte overflow or header rejection', async () => {

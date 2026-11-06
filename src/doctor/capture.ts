@@ -38,6 +38,11 @@ export interface CollectRenderedHtmlOptions {
 }
 
 type CaptureLimits = { timeoutMs: number; concurrency: number; maxBytes: number; maxTotalBytes: number; maxSnapshots: number };
+type CaptureCallbacks = Readonly<{
+  render: CollectRenderedHtmlOptions['render'];
+  fetch: typeof globalThis.fetch;
+  receiver: CollectRenderedHtmlOptions;
+}>;
 const DEFAULTS: Readonly<CaptureLimits> = Object.freeze({ timeoutMs: 30_000, concurrency: 4, maxBytes: 2 * 1024 * 1024, maxTotalBytes: 100 * 1024 * 1024, maxSnapshots: 100 });
 
 function positive(value: number, name: string, maximum = Number.MAX_SAFE_INTEGER): number {
@@ -56,7 +61,7 @@ function validateOrigins(origins: readonly string[]): ReadonlySet<string> {
   return result;
 }
 
-async function boundedHtml(response: Response, maxBytes: number, signal: AbortSignal): Promise<string> {
+async function boundedHtml(response: Response, maxBytes: number, signal: AbortSignal, assertActive: () => void): Promise<string> {
   try {
     if (!response.ok) throw new Error(`capture HTTP ${response.status}`);
     const contentType = response.headers.get('content-type') ?? '';
@@ -75,10 +80,10 @@ async function boundedHtml(response: Response, maxBytes: number, signal: AbortSi
   const cancel = () => { void reader.cancel(signal.reason).catch(() => undefined); };
   signal.addEventListener('abort', cancel, { once: true });
   try {
-    signal.throwIfAborted();
+    assertActive();
     for (;;) {
       const result = await reader.read();
-      signal.throwIfAborted();
+      assertActive();
       if (result.done) { done = true; break; }
       size += result.value.byteLength;
       if (size > maxBytes) throw new RangeError('capture response exceeds maxBytes');
@@ -95,31 +100,45 @@ async function boundedHtml(response: Response, maxBytes: number, signal: AbortSi
   }
 }
 
-async function captureOne(selection: RenderedSnapshotSelection, options: CollectRenderedHtmlOptions, limits: CaptureLimits, parent: AbortSignal): Promise<RenderedSnapshot> {
+async function captureOne(selection: RenderedSnapshotSelection, callbacks: CaptureCallbacks, limits: CaptureLimits, parent: AbortSignal): Promise<RenderedSnapshot> {
   const controller = new AbortController();
   const signal = AbortSignal.any([parent, controller.signal]);
+  const deadline = performance.now() + limits.timeoutMs;
+  const timeoutError = new DOMException('rendered HTML capture timed out', 'TimeoutError');
+  const assertActive = () => {
+    signal.throwIfAborted();
+    // Ready promises and synchronous rendering can prevent the timeout callback from running.
+    if (performance.now() >= deadline) controller.abort(timeoutError);
+    signal.throwIfAborted();
+  };
   let rejectAbort: ((error: unknown) => void) | undefined;
   const abort = () => rejectAbort?.(signal.reason);
-  const timeout = setTimeout(() => controller.abort(new DOMException('rendered HTML capture timed out', 'TimeoutError')), limits.timeoutMs);
+  const timeout = setTimeout(() => controller.abort(timeoutError), limits.timeoutMs);
   signal.addEventListener('abort', abort, { once: true });
   try {
-    signal.throwIfAborted();
+    assertActive();
     const work = async () => {
-      const rendered = options.render
-        ? await options.render(selection, { signal })
-        : await (options.fetch ?? globalThis.fetch)(selection.url, { signal, redirect: 'manual', headers: { Accept: 'text/html' } });
-      if (rendered instanceof Response && rendered.url !== '' && new URL(rendered.url).origin !== new URL(selection.url).origin) {
-        void rendered.body?.cancel().catch(() => undefined);
-        throw new TypeError('capture response origin changed');
+      const rendered = callbacks.render
+        ? await Reflect.apply(callbacks.render, callbacks.receiver, [selection, { signal }])
+        : await Reflect.apply(callbacks.fetch, undefined, [selection.url, { signal, redirect: 'manual', headers: { Accept: 'text/html' } }]);
+      try {
+        assertActive();
+        if (rendered instanceof Response && rendered.url !== '' && new URL(rendered.url).origin !== new URL(selection.url).origin) throw new TypeError('capture response origin changed');
+        const html = typeof rendered === 'string' ? rendered : await boundedHtml(rendered, limits.maxBytes, signal, assertActive);
+        assertActive();
+        if (Buffer.byteLength(html) > limits.maxBytes) throw new RangeError('capture HTML exceeds maxBytes');
+        if (new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(html)) !== html) throw new TypeError('capture HTML contains invalid Unicode');
+        const snapshot = Object.freeze({ id: selection.id, html, sha256: sourceSha256(Buffer.from(html)), document: Object.freeze({
+          path: `${selection.id}.html`, documentUrl: selection.url, sourceKind: 'rendered-html',
+          executionAssumption: 'selected-rendered-state-only; no-script-execution; other-routes-and-states-not-evaluated', bindings: selection.bindings,
+        }) });
+        assertActive();
+        return snapshot;
+      } catch (error) {
+        // A timed-out host callback may still return a response later; do not leave its body open.
+        if (rendered instanceof Response && !rendered.body?.locked) void rendered.body?.cancel().catch(() => undefined);
+        throw error;
       }
-      const html = typeof rendered === 'string' ? rendered : await boundedHtml(rendered, limits.maxBytes, signal);
-      signal.throwIfAborted();
-      if (Buffer.byteLength(html) > limits.maxBytes) throw new RangeError('capture HTML exceeds maxBytes');
-      if (new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(new TextEncoder().encode(html)) !== html) throw new TypeError('capture HTML contains invalid Unicode');
-      return Object.freeze({ id: selection.id, html, sha256: sourceSha256(Buffer.from(html)), document: Object.freeze({
-        path: `${selection.id}.html`, documentUrl: selection.url, sourceKind: 'rendered-html',
-        executionAssumption: 'selected-rendered-state-only; no-script-execution; other-routes-and-states-not-evaluated', bindings: selection.bindings,
-      }) });
     };
     return await Promise.race([work(), new Promise<never>((_, reject) => { rejectAbort = reject; if (signal.aborted) reject(signal.reason); })]);
   } finally {
@@ -130,6 +149,7 @@ async function captureOne(selection: RenderedSnapshotSelection, options: Collect
 
 /** Collect explicit rendered states with bounded fan-out; never discovers routes or executes scripts. */
 export async function collectRenderedHtml(options: CollectRenderedHtmlOptions): Promise<RenderedCollection> {
+  const callbacks: CaptureCallbacks = Object.freeze({ render: options.render, fetch: options.fetch ?? globalThis.fetch, receiver: options });
   const limits = { ...DEFAULTS };
   for (const key of Object.keys(DEFAULTS) as (keyof typeof DEFAULTS)[]) {
     limits[key] = positive(options[key] ?? DEFAULTS[key], key, key === 'timeoutMs' ? 2_147_483_647 : Number.MAX_SAFE_INTEGER);
@@ -156,7 +176,7 @@ export async function collectRenderedHtml(options: CollectRenderedHtmlOptions): 
       const index = next++;
       const selection = selections[index];
       if (!selection) return;
-      const snapshot = await captureOne(selection, options, limits, signal);
+      const snapshot = await captureOne(selection, callbacks, limits, signal);
       totalBytes += Buffer.byteLength(snapshot.html);
       if (totalBytes > limits.maxTotalBytes) throw new RangeError('capture HTML exceeds maxTotalBytes');
       snapshots[index] = snapshot;
