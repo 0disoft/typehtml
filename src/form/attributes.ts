@@ -40,7 +40,8 @@ export function getFieldProps(
   if (!['textarea', 'select'].includes(control)) props.type = control;
   const nonempty = field.type === 'integer' || (field.minLength ?? 0) > 0;
   // HTML required means nonempty/checked, while the contract's required means key presence.
-  if (schema.required.includes(name) && nonempty && control !== 'checkbox') props.required = true;
+  // A radio group's required check tests selection, so an empty-valued selected option is valid.
+  if (schema.required.includes(name) && (control === 'radio' || nonempty && control !== 'checkbox')) props.required = true;
   if (control === 'checkbox' || control === 'radio') {
     if (options.optionValue === undefined) throw new TypeError('checkbox/radio props require an explicit optionValue');
     props.value = options.optionValue;

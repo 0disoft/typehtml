@@ -36,6 +36,15 @@ describe('native form attributes and redisplay state', () => {
     expect(getFieldProps(form, 'name', { control: 'textarea' }).pattern).toBeUndefined();
   });
 
+  it('requires selection for required radio keys without excluding an empty option value', () => {
+    const empty = getFieldProps(form, 'empty', { control: 'radio', optionValue: '', state: createFormState({ empty: '' }, []) });
+    expect(empty).toMatchObject({ type: 'radio', required: true, value: '', checked: true });
+    expect(getFieldProps(form, 'optional', { control: 'radio', optionValue: 'x' }).required).toBeUndefined();
+    expect(getFieldProps(form, 'empty', { control: 'text' }).required).toBeUndefined();
+    // Individual required checkboxes would incorrectly require every option in an unknown host group.
+    expect(getFieldProps(form, 'empty', { control: 'checkbox', optionValue: '' }).required).toBeUndefined();
+  });
+
   it('preserves canonical integer text validation and exposes numeric bounds only on number inputs', () => {
     const text = getFieldProps(form, 'count');
     expect(text).toMatchObject({ type: 'text', inputmode: 'numeric', pattern: '(0|-?[1-9][0-9]*)', required: true });
