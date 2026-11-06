@@ -10,7 +10,7 @@ import {
   resolveEffectiveTarget,
   attribute,
 } from './html.ts';
-import type { CollectionResult, ControlFact, FormFact, ParsedDocument, TargetResult } from './html.ts';
+import type { CollectionResult, ControlFact, EffectiveTarget, FormFact, ParsedDocument, TargetResult } from './html.ts';
 import { DoctorConfigError, loadDoctorConfig, readConfiguredDocument, MAX_TOTAL_DOCUMENT_BYTES } from './config.ts';
 import type { DoctorBindingConfig, DoctorDocumentConfig, LoadedDoctorConfig } from './types.ts';
 import type {
@@ -494,14 +494,24 @@ function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: Co
   const { snapshot: { document }, binding, form, check } = bound;
   const location = submitter?.location ?? form.location;
   const resolved = resolveEffectiveTarget(form, submitter);
+  const target = analyzeTarget(collector, bound, location, resolved);
   const collection = collectFormEntries(form, submitter);
   const entriesByName = indexEntries(collection.entries);
   const fact = submissionFact(bound, submitter, activation, resolved, collection, entriesByName);
   if (!state.budget.acceptSubmission(fact)) return false;
   submissions.push(fact);
+  if (target === null) return true;
+  checkSupply(collector, check, form, collection, entriesByName, document.path, binding, location);
+  checkConstraints(collector, check, entriesByName, document.path, binding, target.skipValidation);
+  return true;
+}
+
+/** Evidence size limits must not discard target diagnostics that were already resolved. */
+function analyzeTarget(collector: Collector, bound: BoundForm, location: SourceLocation, resolved: TargetResult): EffectiveTarget | null {
+  const { snapshot: { document }, binding, check } = bound;
   if (resolved.target === null) {
     recordUnsupportedTarget(collector, bound, location, resolved);
-    return true;
+    return null;
   }
   if (resolved.target.url.origin !== new URL(document.documentUrl).origin) {
     collector.add(diagnosticError('BC011', 'method-path-mismatch', `${binding.actionId}/native/target-external`, 'external-origin',
@@ -513,11 +523,9 @@ function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: Co
   if (resolved.problem?.code === 'UNSUPPORTED_ENCODING' || resolved.problem?.code === 'UNSUPPORTED_METHOD') {
     collector.add(diagnosticUnknown('BC012', 'unsupported-transport', `${binding.actionId}/native/${resolved.problem.code}`, `unsupported-${resolved.problem.code.toLowerCase()}`, resolved.problem.message, location));
     collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'target', actualStatus: 'unsupported', evidenceRef: location, note: resolved.problem.message });
-    return true;
+    return null;
   }
-  checkSupply(collector, check, form, collection, entriesByName, document.path, binding, location);
-  checkConstraints(collector, check, entriesByName, document.path, binding, resolved.target.skipValidation);
-  return true;
+  return resolved.target;
 }
 
 /** New provenance records keep parsed controls and configured bindings unchanged. */
@@ -572,8 +580,9 @@ function completeReport(loaded: LoadedDoctorConfig, state: AnalysisState): Docto
 
 export async function runDoctor(configPath: string, limits: Partial<AnalysisLimits> = {}): Promise<DoctorReport> {
   try {
+    const selectedLimits: Partial<AnalysisLimits> = Object.fromEntries(Object.entries(limits));
     const loaded = await loadDoctorConfig(configPath);
-    return await analyzeLoaded(loaded, limits);
+    return await analyzeLoaded(loaded, selectedLimits);
   } catch (error) {
     if (error instanceof DoctorConfigError) return configErrorReport(configPath, error.message);
     return configErrorReport(configPath, error instanceof Error ? error.message : 'unexpected Doctor failure');

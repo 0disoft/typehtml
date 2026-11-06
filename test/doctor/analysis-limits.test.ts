@@ -7,7 +7,7 @@ import { DEFAULT_ANALYSIS_LIMITS } from '../../src/doctor/budget.ts';
 import { defineForm } from '../../src/form/definition.ts';
 import { loadForm, projectForm } from '../../src/form/manifest.ts';
 
-async function fixture(fields: number, buttons: number, work: (config: string, controls: number) => Promise<void>, options: { defect?: boolean; missingDocument?: boolean; optional?: boolean } = {}): Promise<void> {
+async function fixture(fields: number, buttons: number, work: (config: string, controls: number) => Promise<void>, options: { defect?: boolean; firstButtonAttributes?: string; missingDocument?: boolean; optional?: boolean } = {}): Promise<void> {
   const parent = await realpath(tmpdir());
   const directory = await mkdtemp(join(parent, 'typehtml-analysis-limits-'));
   try {
@@ -21,7 +21,7 @@ async function fixture(fields: number, buttons: number, work: (config: string, c
     const projection = projectForm(loaded.form, { sourcePath: 'form.json', sourceSha256: loaded.sourceSha256 });
     const body = Object.keys(properties).map((name) => `<input type="number" name="${name}" min="1" max="10">`).join('')
       + '<input type="hidden" name="_bc_csrf">'
-      + Array.from({ length: buttons }, (_, i) => `<button${options.defect && i === 0 ? ' formmethod="get"' : ''}>Send</button>`).join('');
+      + Array.from({ length: buttons }, (_, i) => `<button${i === 0 ? options.firstButtonAttributes ?? (options.defect ? ' formmethod="get"' : '') : ''}>Send</button>`).join('');
     const document = { path: 'form.html', documentUrl: 'https://example.test/form', sourceKind: 'rendered-snapshot',
       executionAssumption: 'native-no-script', bindings: [{ formId: 'f', actionId: form.id, required: !options.optional }] };
     await Promise.all([
@@ -106,6 +106,39 @@ describe('bounded Doctor orchestration', () => {
       expect(report.exitCode).toBe(2);
       expect(report.status).toBe('configuration-error');
       expect(report.submissions).toHaveLength(0);
+    });
+  });
+
+  test.each([
+    ['GET method', ' formmethod="get"', 1],
+    ['external origin', ' formaction="https://external.test/submit"', 1],
+    ['unsupported encoding', ' formenctype="multipart/form-data"', 3],
+    ['invalid target', ' formaction="http://["', 3],
+  ] as const)('keeps resolved %s diagnostics when submission evidence cannot fit', async (_name, attributes, exitCode) => {
+    await fixture(1, 1, async (config) => {
+      const complete = await runDoctor(config);
+      expect(complete.findings).not.toHaveLength(0);
+      const partial = await runDoctor(config, { maxSubmissionBytes: 2 });
+      expect(partial.analysisTruncated).toBe(true);
+      expect(partial.submissions).toHaveLength(0);
+      expect(partial.findings.map((finding) => finding.subcode))
+        .toEqual([...complete.findings.map((finding) => finding.subcode), 'analysis-budget-exceeded']);
+      expect(partial.exitCode).toBe(exitCode);
+      expect(partial.coverage.some((row) => row.ruleGroup === 'target')).toBe(true);
+      expect(partial.coverage.some((row) => row.ruleGroup === 'supply' && row.actualStatus === 'checked')).toBe(false);
+    }, { firstButtonAttributes: attributes });
+  });
+
+  test('snapshots per-run limits before asynchronous configuration reads', async () => {
+    await fixture(1, 2, async (config) => {
+      const limits = { maxPaths: 1 };
+      const pending = runDoctor(config, limits);
+      limits.maxPaths = 2;
+      const report = await pending;
+      expect(report.analysisTruncated).toBe(true);
+      expect(report.submissions).toHaveLength(1);
+      expect(report.exitCode).toBe(3);
+      expect(limits.maxPaths).toBe(2);
     });
   });
 });
