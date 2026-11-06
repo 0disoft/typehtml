@@ -23,8 +23,9 @@ export function getSchemaFieldProps(form: DefinedSchemaForm, name: string, optio
     const id = options.id ?? formFieldId(name);
     const invalid = (options.state?.fieldErrors[name]?.length ?? 0) > 0;
     const describedBy = [options.describedBy, invalid ? `${id}-error` : undefined].filter(Boolean).join(' ');
-    return Object.freeze({ id, name, type: 'checkbox', value: options.optionValue ?? item.trueValue ?? 'on',
-      checked: Array.isArray(raw) ? raw.includes(options.optionValue ?? item.trueValue ?? 'on') : raw === (item.trueValue ?? 'on'),
+    const value = options.optionValue ?? item.trueValue ?? 'on';
+    return Object.freeze({ id, name, type: 'checkbox', value,
+      checked: Array.isArray(raw) ? raw.includes(value) : raw === value,
       required: field.required === true && field.type !== 'array' || undefined,
       'aria-invalid': invalid ? 'true' : undefined, 'aria-describedby': describedBy || undefined });
   }
@@ -41,28 +42,39 @@ function renderControl(form: DefinedSchemaForm, name: string, field: FormField, 
     const raw = state.rawValues[name];
     const values = typeof raw === 'string' ? [raw] : raw ?? [];
     const visible = values.length === 0 && (field.required || (field.minItems ?? 0) > 0) ? [''] : values;
-    return visible.map((value, index) => `<input${renderAttributes({ ...getSchemaFieldProps(form, name, { state, control: 'text', id: index === 0 ? formFieldId(name) : `${formFieldId(name)}-${index}` }), value })}>`).join('');
+    return visible.map((value, index) => {
+      const props = getSchemaFieldProps(form, name, { state, control: 'text', id: index === 0 ? formFieldId(name) : `${formFieldId(name)}-${index}` });
+      // Native text inputs sanitize newlines; textarea preserves multiline raw values.
+      if (/[\r\n]/.test(value)) {
+        const { type: _, ...attributes } = props;
+        return `<textarea${renderAttributes(attributes)}>\n${escapeHtml(value)}</textarea>`;
+      }
+      return `<input${renderAttributes({ ...props, value })}>`;
+    }).join('');
   }
-  if (item.type === 'boolean' && item.falseValue !== undefined) {
-    const raw = state.rawValues[name];
-    const selected = typeof raw === 'string' ? raw : item.falseValue;
+  const raw = state.rawValues[name];
+  if (item.type === 'boolean' && (item.falseValue !== undefined || typeof raw === 'string' && raw !== (item.trueValue ?? 'on'))) {
+    const selected = typeof raw === 'string' ? raw : item.falseValue!;
     const { type: _, checked: __, value: ___, required: ____, ...props } = getSchemaFieldProps(form, name, { state });
-    const values = [...new Set([item.trueValue ?? 'on', item.falseValue, selected])];
+    const values = [...new Set([item.trueValue ?? 'on', ...(item.falseValue === undefined ? [] : [item.falseValue]), selected])];
     return `<select${renderAttributes(props)}>${values.map((value) => `<option${renderAttributes(getOptionProps(value, selected))}>${escapeHtml(value)}</option>`).join('')}</select>`;
   }
   if (field.control === 'radio' && 'enum' in item && item.enum !== undefined) {
-    return item.enum.map((value, index) => `<label><input${renderAttributes(getSchemaFieldProps(form, name, { state, control: 'radio', optionValue: String(value), id: index === 0 ? formFieldId(name) : `${formFieldId(name)}-${index}` }))}>${escapeHtml(String(value))}</label>`).join('');
+    const values = item.enum.map(String);
+    if (typeof raw === 'string' && !values.includes(raw)) values.push(raw);
+    return values.map((value, index) => `<label><input${renderAttributes(getSchemaFieldProps(form, name, { state, control: 'radio', optionValue: value, id: index === 0 ? formFieldId(name) : `${formFieldId(name)}-${index}` }))}>${escapeHtml(value)}</label>`).join('');
   }
   const props = getSchemaFieldProps(form, name, { state });
-  if (props.type === 'checkbox') return `<input${renderAttributes(props)}>`;
-  const raw = state.rawValues[name];
-  if (field.control === 'textarea') {
-    const { value: _, ...attributes } = props;
-    return `<textarea${renderAttributes(attributes)}>${escapeHtml(typeof raw === 'string' ? raw : '')}</textarea>`;
+  if (props.type === 'checkbox' && !(typeof raw === 'string' && raw !== props.value)) return `<input${renderAttributes(props)}>`;
+  if (field.control === 'textarea' || typeof raw === 'string' && /[\r\n]/.test(raw)) {
+    const { value: _, type: __, ...attributes } = props;
+    // HTML strips one leading LF immediately after a textarea start tag.
+    return `<textarea${renderAttributes(attributes)}>\n${escapeHtml(typeof raw === 'string' ? raw : '')}</textarea>`;
   }
-  if (field.control === 'select') {
-    const { value: _, ...attributes } = props;
-    const values = 'enum' in item && item.enum !== undefined ? item.enum.map(String) : typeof raw === 'string' ? [raw] : raw ?? [];
+  if (field.control === 'select' || props.type === 'checkbox') {
+    const { value: _, type: __, checked: ___, ...attributes } = props;
+    const values = 'enum' in item && item.enum !== undefined ? item.enum.map(String) : typeof raw === 'string' ? [raw] : [...raw ?? []];
+    if (typeof raw === 'string' && !values.includes(raw)) values.push(raw);
     return `<select${renderAttributes(attributes)}><option value=""></option>${values.map((value) => `<option${renderAttributes(getOptionProps(value, raw))}>${escapeHtml(value)}</option>`).join('')}</select>`;
   }
   return `<input${renderAttributes(props)}>`;

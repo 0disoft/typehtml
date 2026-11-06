@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import * as v from 'valibot';
 import { type } from 'arktype';
+import { parse, type DefaultTreeAdapterTypes } from 'parse5';
 import {
   defineSchemaForm, createSchemaFormHandler, getSchemaFieldProps, createFormState, prepareFields,
-  validateStandard, type SchemaFormInput,
+  validateStandard, type SchemaFormInput, renderSchemaFormErrors,
 } from '../../src/index.ts';
 
 const origin = 'https://app.test';
@@ -31,6 +32,38 @@ function handler(overrides: { execute?: (input: SchemaFormInput<typeof form>) =>
     execute: ({ input }) => { overrides.execute?.(input); return { message: input.user.name }; },
     project: (value) => value, success: () => ({ location: '/done' }), invalid: overrides.invalid, onError: overrides.onError,
   });
+}
+
+/** Selected successful controls from parsed HTML, rather than source-string regexes. */
+function successfulFields(html: string): readonly (readonly [string, string])[] {
+  type Element = DefaultTreeAdapterTypes.Element;
+  type Node = DefaultTreeAdapterTypes.Node;
+  const fields: [string, string][] = [];
+  const attribute = (node: Element, name: string) => node.attrs.find((attr) => attr.name === name)?.value;
+  const text = (node: Node): string => 'value' in node ? node.value : 'childNodes' in node ? node.childNodes.map(text).join('') : '';
+  const visit = (node: Node) => {
+    if ('tagName' in node) {
+      const name = attribute(node, 'name');
+      if (name !== undefined && attribute(node, 'disabled') === undefined) {
+        if (node.tagName === 'input') {
+          const type = attribute(node, 'type') ?? 'text';
+          if (!['submit', 'button', 'reset'].includes(type) && (!['checkbox', 'radio'].includes(type) || attribute(node, 'checked') !== undefined)) {
+            const value = attribute(node, 'value') ?? (['checkbox', 'radio'].includes(type) ? 'on' : '');
+            fields.push([name, type === 'text' ? value.replace(/[\r\n]/g, '') : value]);
+          }
+        } else if (node.tagName === 'textarea') fields.push([name, text(node)]);
+        else if (node.tagName === 'select') {
+          const options = node.childNodes.filter((item): item is Element => 'tagName' in item && item.tagName === 'option');
+          const selected = options.filter((option) => attribute(option, 'selected') !== undefined);
+          const values = selected.length === 0 && attribute(node, 'multiple') === undefined ? options.slice(0, 1) : selected;
+          for (const option of values) fields.push([name, attribute(option, 'value') ?? text(option)]);
+        }
+      }
+    }
+    if ('childNodes' in node) for (const child of node.childNodes) visit(child);
+  };
+  visit(parse(html));
+  return fields;
 }
 
 describe('Standard Schema native forms', () => {
@@ -130,5 +163,49 @@ describe('Standard Schema native forms', () => {
     const handle = createSchemaFormHandler(sparse, { allowedOrigins: [origin], authenticate: () => ({}), csrfToken: () => 'token', authorize: () => true, execute: () => 'ok', project: (x) => x, success: () => ({ location: '/' }) });
     expect((await handle(request(new URLSearchParams({ _bc_csrf: 'token', 'items[1].name': 'x' })))).status).toBe(422);
     expect((await handler()(request(body([['tags', 'a']])))).status).toBe(422);
+  });
+
+  test('parsed 422 HTML preserves invalid choices, leading textarea LF and repeated-value order', () => {
+    const redisplay = defineSchemaForm({ id: 'redisplay', path: '/profile', fields: {
+      note: { type: 'string', control: 'textarea' },
+      channel: { type: 'string', enum: ['email', 'paper'], control: 'radio' },
+      delivery: { type: 'string', enum: ['email', 'paper'], control: 'select' },
+      checkbox: { type: 'string', enum: ['yes', 'no'], control: 'checkbox' },
+      agreed: { type: 'boolean', trueValue: 'yes' },
+      explicit: { type: 'boolean', trueValue: 'yes', falseValue: 'no' },
+      flags: { type: 'array', items: { type: 'boolean', trueValue: 'yes', falseValue: 'no' } },
+      tags: { type: 'array', items: { type: 'string' } },
+    }, input: z.unknown(), output: z.string() });
+    const raw = { note: '\nfirst\nlast', channel: '<invalid>', delivery: 'other', checkbox: 'no', agreed: 'invalid', explicit: 'no', flags: ['no', 'yes', 'no'], tags: ['b', '\na\nb', 'b'] };
+    const html = renderSchemaFormErrors(redisplay, raw, [{ field: 'channel', code: 'ENUM', message: 'bad' }], 'token');
+    const selected = successfulFields(html);
+    for (const [name, value] of Object.entries(raw)) {
+      expect(selected.filter(([field]) => field === name).map(([, value]) => value)).toEqual(typeof value === 'string' ? [value] : value);
+    }
+    expect(html).not.toContain('<invalid>');
+    expect(selected.filter(([name]) => name === '_bc_csrf')).toEqual([['_bc_csrf', 'token']]);
+    expect(getSchemaFieldProps(redisplay, 'explicit', { state: createFormState({ explicit: 'no' }, []), optionValue: 'no' }).checked).toBe(true);
+  });
+
+  test('snapshots null-prototype field data while rejecting getters and non-data descriptors without executing them', () => {
+    const allowed = ['a', 'b'];
+    const fields = Object.assign(Object.create(null), { tags: { type: 'array', items: { type: 'string', enum: allowed } } });
+    const snapshot = prepareFields(fields);
+    allowed.push('c');
+    fields.tags.items.enum = ['changed'];
+    expect(snapshot.tags).toMatchObject({ items: { enum: ['a', 'b'] } });
+    expect(Object.isFrozen(allowed)).toBe(false);
+    expect(Object.isFrozen((snapshot.tags as any).items.enum)).toBe(true);
+    let calls = 0;
+    const accessor = Object.defineProperty({}, 'name', { enumerable: true, get() { calls++; return { type: 'string' }; } });
+    expect(() => prepareFields(accessor)).toThrow('data properties');
+    const nested = { name: Object.defineProperty({ type: 'string' }, 'enum', { enumerable: true, get() { calls++; return ['a']; } }) };
+    expect(() => prepareFields(nested as any)).toThrow('data properties');
+    expect(calls).toBe(0);
+    expect(() => prepareFields({ name: { type: 'array', items: null } } as any)).toThrow('scalar field');
+    const cyclic: any = {}; cyclic.name = cyclic;
+    expect(() => prepareFields(cyclic)).toThrow('cycles');
+    class Descriptor { type = 'string'; }
+    expect(() => prepareFields({ name: new Descriptor() } as any)).toThrow('plain objects');
   });
 });

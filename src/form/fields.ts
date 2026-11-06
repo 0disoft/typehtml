@@ -33,6 +33,7 @@ export function fieldPath(name: string): readonly Segment[] {
 }
 
 function validateScalar(field: ScalarFormField): void {
+  if (field === null || typeof field !== 'object' || Array.isArray(field)) throw new TypeError('invalid scalar field definition');
   const keys = field.type === 'string' ? ['type', 'minLength', 'maxLength', 'const', 'enum', 'pattern']
     : field.type === 'integer' ? ['type', 'minimum', 'maximum', 'const', 'enum']
     : field.type === 'boolean' ? ['type', 'trueValue', 'falseValue'] : [];
@@ -56,8 +57,29 @@ function validateScalar(field: ScalarFormField): void {
   }
 }
 
+/** Inspect descriptors before cloning: structuredClone otherwise executes configuration getters. */
+function assertFieldData(value: unknown, ancestors = new Set<object>(), depth = 0): void {
+  if (value === null || value === undefined || ['string', 'number', 'boolean'].includes(typeof value)) return;
+  if (typeof value !== 'object' || depth > 8) throw new TypeError('field configuration must contain plain data');
+  const array = Array.isArray(value);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== null && prototype !== (array ? Array.prototype : Object.prototype)) throw new TypeError('field configuration must contain plain objects');
+  if (ancestors.has(value)) throw new TypeError('field configuration must not contain cycles');
+  ancestors.add(value);
+  try {
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (typeof key !== 'string') throw new TypeError('field configuration must not contain symbol keys');
+      const descriptor = descriptors[key]!;
+      if (!('value' in descriptor) || (!descriptor.enumerable && !(array && key === 'length'))) throw new TypeError('field configuration must contain enumerable data properties');
+      assertFieldData(descriptor.value, ancestors, depth + 1);
+    }
+  } finally { ancestors.delete(value); }
+}
+
 /** Clone/freeze configuration and reject path aliases, container conflicts, and dangerous keys. */
 export function prepareFields(fields: FormFields): FormFields {
+  assertFieldData(fields);
   const snapshot = structuredClone(fields);
   if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) throw new TypeError('fields must be an object');
   const entries = Object.entries(snapshot);
