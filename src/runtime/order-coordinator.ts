@@ -72,7 +72,7 @@ export class OrderCoordinator {
 
   constructor(options: OrderCoordinatorOptions) {
     this.loaded = options.loaded;
-    this.bindings = options.bindings;
+    this.bindings = snapshotOrderBindings(options.bindings);
     this.storage = options.storage;
     this.now = options.now ?? Date.now;
     this.maxOpenIntents = options.maxOpenIntents ?? 20;
@@ -458,6 +458,20 @@ export class OrderCoordinator {
     if (!Number.isSafeInteger(now) || now < 0) throw new OrderFailure(500, 'INVALID_CLOCK');
     return now;
   }
+}
+
+/** Own the role references while leaving receiver state under the caller's control. */
+function snapshotOrderBindings(bindings: OrderBindings): OrderBindings {
+  return Object.freeze({
+    prepareIntent: bindings.prepareIntent.bind(bindings),
+    load: bindings.load.bind(bindings),
+    authorize: bindings.authorize.bind(bindings),
+    execute: bindings.execute.bind(bindings),
+    project: bindings.project.bind(bindings),
+    loadReceipt: bindings.loadReceipt.bind(bindings),
+    authorizeReceipt: bindings.authorizeReceipt.bind(bindings),
+    projectReceipt: bindings.projectReceipt.bind(bindings),
+  });
 }
 
 /** Pure result metadata calculation; the database writes remain in the locked sequence. */
