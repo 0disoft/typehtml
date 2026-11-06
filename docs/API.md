@@ -181,7 +181,7 @@ Doctor analyzes selected native paths, not an entire application's protection. I
 
 Doctor bounds each run to 1,000 native paths, 100,000 control visits across those paths, and 4 MiB of compact UTF-8 JSON in the `submissions` array. This byte limit covers submission evidence, not the entire report or pretty-printing. Evidence is measured incrementally before it is retained. When a limit stops analysis, the report includes `analysisTruncated: true` and an `analysis-budget-exceeded` finding; remaining boundaries are not evaluated. This produces exit code 3 even when incomplete coverage was allowed by the audit policy. Existing confirmed defects and execution errors retain exit codes 1 and 2 respectively.
 
-The `doctor` entry point exports `DEFAULT_ANALYSIS_LIMITS` and `AnalysisLimits`. Programmatic callers can override individual limits with `runDoctor(configPath, { maxPaths, maxControlVisits, maxSubmissionBytes })`; omitted values keep their defaults. Increase these limits only for workloads whose processing and report sizes your host can accommodate.
+The `doctor` entry point exports `DEFAULT_ANALYSIS_LIMITS` and `AnalysisLimits`. Programmatic callers can override individual limits with `runDoctor(configPath, { maxPaths, maxControlVisits, maxSubmissionBytes })`; omitted values keep their defaults. Per-run overrides are copied before asynchronous configuration loading. Resolved target diagnostics remain in the report when the submission byte limit is reached; further supply and constraint checks stop. Increase these limits only for workloads whose processing and report sizes your host can accommodate.
 
 ## Lower-level helpers
 
