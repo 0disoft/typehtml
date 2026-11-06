@@ -55,6 +55,14 @@ describe('Doctor development integrations', () => {
     expect(report.scope.applicationCompleteness).toBe('not-evaluated');
   });
 
+  test('disabled checked radio cannot turn conditional required supply into a successful Doctor run', async () => {
+    const { configPath, htmlPath } = await fixture();
+    await writeFile(htmlPath, validHtml.replace('<textarea name="name"></textarea>', '<input type="radio" name="name" required value="a"><input type="radio" name="name" disabled checked value="b">'));
+    const report = await runDoctor(configPath);
+    expect(report.exitCode).toBe(3);
+    expect(report.findings.some((finding) => finding.subcode === 'conditional-required-field' && finding.analysisStatus === 'unknown')).toBe(true);
+  });
+
   test('CLI captures a live selected HTML response and emits verified Doctor SARIF', async () => {
     const { root } = await fixture();
     const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response(validHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }) });

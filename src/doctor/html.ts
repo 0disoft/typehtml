@@ -313,7 +313,8 @@ export function collectFormEntries(form: FormFact, submitter: ControlFact | null
   const unsupportedControls: { control: ControlFact; reason: string }[] = [];
   const radioGroups = new Map<string, ControlFact[]>();
   for (const control of form.controls) {
-    if (control.disabled || control.type !== 'radio' || control.name === null) continue;
+    // Disabled radios still participate in group required/checked validation, but not submission.
+    if (control.type !== 'radio' || control.name === null) continue;
     const group = radioGroups.get(control.name);
     if (group) group.push(control); else radioGroups.set(control.name, [control]);
   }
@@ -344,8 +345,9 @@ export function collectFormEntries(form: FormFact, submitter: ControlFact | null
       if (emittedRadioGroups.has(control.name)) continue;
       emittedRadioGroups.add(control.name);
       const group = radioGroups.get(control.name)!;
-      const representative = group.findLast((item) => hasAttribute(item.element, 'checked')) ?? group[0]!;
-      if (skipValidation || !group.some((item) => item.required)) conditionalNames.add(control.name);
+      const checked = group.findLast((item) => hasAttribute(item.element, 'checked'));
+      const representative = checked !== undefined && !checked.disabled ? checked : control;
+      if (skipValidation || !group.some((item) => item.required) || checked?.disabled === true) conditionalNames.add(control.name);
       append(representative, attribute(representative.element, 'value') ?? 'on');
       continue;
     }

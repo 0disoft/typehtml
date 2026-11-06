@@ -21,6 +21,16 @@ describe('Doctor native choice controls', () => {
     expect(collect('<input type="radio" name="x" value="a"><input type="radio" name="x" value="b">').conditionalNames.has('x')).toBe(true);
   });
 
+  test('does not claim supply when a disabled checked radio satisfies required group validation', () => {
+    const result = collect('<input type="radio" name="choice" required value="a"><input type="radio" name="choice" disabled checked value="b">');
+    expect(result.possibleCounts.get('choice')).toBe(1);
+    expect(result.entries[0]?.value).toBe('a');
+    expect(result.conditionalNames.has('choice')).toBe(true);
+    // A disabled required member still makes the same native radio group required.
+    const required = collect('<input type="radio" name="choice" value="a"><input type="radio" name="choice" disabled required value="b">');
+    expect(required.conditionalNames.has('choice')).toBe(false);
+  });
+
   test('optional choices remain conditional, required validation is activation-specific', () => {
     const html = '<input type="checkbox" name="accept" required><input type="checkbox" name="news" checked>';
     const result = collect(html);
