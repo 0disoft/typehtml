@@ -59,8 +59,9 @@ function renderControl(form: DefinedSchemaForm, name: string, field: FormField, 
     const values = [...new Set([item.trueValue ?? 'on', ...(item.falseValue === undefined ? [] : [item.falseValue]), selected])];
     return `<select${renderAttributes(props)}>${values.map((value) => `<option${renderAttributes(getOptionProps(value, selected))}>${escapeHtml(value)}</option>`).join('')}</select>`;
   }
-  if (field.control === 'radio' && 'enum' in item && item.enum !== undefined) {
-    const values = item.enum.map(String);
+  if (field.control === 'radio') {
+    const values = 'enum' in item && item.enum !== undefined ? item.enum.map(String)
+      : [String('const' in item && item.const !== undefined ? item.const : raw ?? 'on')];
     if (typeof raw === 'string' && !values.includes(raw)) values.push(raw);
     return values.map((value, index) => `<label><input${renderAttributes(getSchemaFieldProps(form, name, { state, control: 'radio', optionValue: value, id: index === 0 ? formFieldId(name) : `${formFieldId(name)}-${index}` }))}>${escapeHtml(value)}</label>`).join('');
   }

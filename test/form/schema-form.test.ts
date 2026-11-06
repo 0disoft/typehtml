@@ -241,6 +241,17 @@ describe('Standard Schema native forms', () => {
     expect(getSchemaFieldProps(redisplay, 'explicit', { state: createFormState({ explicit: 'no' }, []), optionValue: 'no' }).checked).toBe(true);
   });
 
+  test('parsed 422 HTML preserves scalar radio values without an enum', () => {
+    const radio = defineSchemaForm({ id: 'radio.scalar', path: '/profile', fields: {
+      free: { type: 'string', control: 'radio' },
+      constant: { type: 'integer', const: 1, control: 'radio' },
+    }, input: z.unknown(), output: z.string() });
+    const html = renderSchemaFormErrors(radio, { free: 'custom', constant: '2' }, [{ field: 'constant', code: 'CONST', message: 'must be one' }], 'token');
+    const selected = successfulFields(html);
+    expect(selected.filter(([name]) => name === 'free')).toEqual([['free', 'custom']]);
+    expect(selected.filter(([name]) => name === 'constant')).toEqual([['constant', '2']]);
+  });
+
   test('snapshots null-prototype field data while rejecting getters and non-data descriptors without executing them', () => {
     const allowed = ['a', 'b'];
     const fields = Object.assign(Object.create(null), { tags: { type: 'array', items: { type: 'string', enum: allowed } } });
