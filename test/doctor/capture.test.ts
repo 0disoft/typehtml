@@ -52,7 +52,7 @@ describe('explicit rendered HTML capture', () => {
   });
 
   test('rejects invalid UTF-8, malformed declared length and ill-formed rendered Unicode', async () => {
-    for (const rendered of [new Response(new Uint8Array([0xff]), { headers: { 'Content-Type': 'text/html' } }), new Response('a', { headers: { 'Content-Type': 'text/html', 'Content-Length': 'x' } }), '\ud800']) {
+    for (const rendered of [new Response(new Uint8Array([0xff]), { headers: { 'Content-Type': 'text/html' } }), new Response('a', { headers: { 'Content-Type': 'text/html', 'Content-Length': 'x' } }), new Response('a', { headers: { 'Content-Type': 'text/html; charset=shift_jis' } }), '\ud800']) {
       await expect(collectRenderedHtml({ ...options, render: () => rendered })).rejects.toThrow();
     }
   });

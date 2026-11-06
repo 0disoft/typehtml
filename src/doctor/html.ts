@@ -287,11 +287,21 @@ function textContent(node: P5Node): string {
   return 'childNodes' in node ? node.childNodes.map(textContent).join('') : '';
 }
 
+function optionIsDisabled(option: P5Element): boolean {
+  return hasAttribute(option, 'disabled') ||
+    (parentOf(option)?.nodeName === 'optgroup' && hasAttribute(parentOf(option) as P5Element, 'disabled'));
+}
+
 function selectOptions(control: ControlFact): P5Element[] {
   const elements: P5Element[] = [];
   walkElements(control.element, elements);
-  return elements.filter((option) => option.tagName === 'option' && !hasAttribute(option, 'disabled') &&
-    !(parentOf(option)?.nodeName === 'optgroup' && hasAttribute(parentOf(option) as P5Element, 'disabled')));
+  return elements.filter((option) => option.tagName === 'option');
+}
+
+function optionText(node: P5Node): string {
+  if (isElement(node) && node.tagName === 'script') return '';
+  if (node.nodeName === '#text') return (node as DefaultTreeAdapterTypes.TextNode).value;
+  return 'childNodes' in node ? node.childNodes.map(optionText).join('') : '';
 }
 
 /** Possible successful controls, not an exhaustive enumeration of every user-selected state. */
@@ -345,14 +355,17 @@ export function collectFormEntries(form: FormFact, submitter: ControlFact | null
       continue;
     }
     if (control.tagName === 'select') {
-      const options = selectOptions(control);
+      const allOptions = selectOptions(control);
+      const options = allOptions.filter((option) => !optionIsDisabled(option));
       if (options.length === 0) continue;
       const selected = options.findLast((option) => hasAttribute(option, 'selected')) ?? options[0]!;
       const size = Number(attribute(control.element, 'size') ?? 0);
       if (control.multiple || size > 1) {
         if (skipValidation || !control.required) conditionalNames.add(control.name);
       }
-      append(control, attribute(selected, 'value') ?? textContent(selected).replace(/[\t\n\f\r ]+/g, ' ').trim(), control.multiple ? options.length : 1);
+      // A disabled selected option can satisfy native required validation but supplies no entry.
+      if (allOptions.some((option) => optionIsDisabled(option) && hasAttribute(option, 'selected'))) conditionalNames.add(control.name);
+      append(control, attribute(selected, 'value') ?? optionText(selected).replace(/[\t\n\f\r ]+/g, ' ').replace(/^ | $/g, ''), control.multiple ? options.length : 1);
       continue;
     }
     append(control, control.tagName === 'textarea' ? textContent(control.element).replace(/\r?\n/g, '\r\n') : attribute(control.element, 'value') ?? '');

@@ -1,18 +1,37 @@
 import { stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { readStrictJson } from '../contract/strict-json.ts';
 import { runDoctor } from './analyze.ts';
 import { loadDoctorConfig } from './config.ts';
 import type { DoctorReport } from './types.ts';
 
-async function selectedPaths(configPath: string): Promise<string[]> {
+async function selectedPaths(configPath: string, previous: readonly string[] = []): Promise<string[]> {
   const paths = new Set([resolve(configPath)]);
   try {
     const loaded = await loadDoctorConfig(configPath);
     for (const input of loaded.config.inputs) paths.add(resolve(loaded.baseDir, input.path));
     for (const document of loaded.config.documents) paths.add(resolve(loaded.baseDir, document.path));
     for (const projection of loaded.formChecks.values()) paths.add(resolve(loaded.baseDir, projection.source.path));
-  } catch { /* Invalid configurations remain watched and are reported by runDoctor. */ }
+  } catch {
+    // Keep known dependencies while a projection is broken, so fixing that file can recover the watch.
+    for (const path of previous) paths.add(path);
+    try {
+      const config = await readStrictJson(configPath);
+      if (config !== null && typeof config === 'object' && !Array.isArray(config)) {
+        const root = resolve(typeof config.root === 'string' ? config.root : '.');
+        for (const list of [config.inputs, config.documents]) {
+          if (!Array.isArray(list)) continue;
+          for (const item of list) {
+            if (item === null || typeof item !== 'object' || Array.isArray(item) || typeof item.path !== 'string') continue;
+            const absolute = resolve(root, item.path);
+            const rel = relative(root, absolute);
+            if (rel !== '..' && !rel.startsWith('..\\') && !rel.startsWith('../') && !isAbsolute(rel)) paths.add(absolute);
+          }
+        }
+      }
+    } catch { /* runDoctor owns configuration error diagnostics. */ }
+  }
   return [...paths];
 }
 
@@ -44,7 +63,7 @@ export async function watchDoctor(configPath: string, options: Readonly<{
       previous = current;
       await options.onReport(await runDoctor(configPath));
       if (++runs === options.maxRuns) return;
-      const selected = await selectedPaths(configPath);
+      const selected = await selectedPaths(configPath, paths);
       if (JSON.stringify(paths) !== JSON.stringify(selected)) { paths = selected; previous = ''; }
     }
     try { await delay(interval, undefined, { signal: options.signal }); }

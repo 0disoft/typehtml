@@ -1,4 +1,4 @@
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { sourceSha256 } from '../contract/behavior.ts';
 import type { DoctorBindingConfig, DoctorConfig, DoctorDocumentConfig, DoctorInputConfig } from './types.ts';
@@ -59,7 +59,11 @@ function validateOrigins(origins: readonly string[]): ReadonlySet<string> {
 async function boundedHtml(response: Response, maxBytes: number, signal: AbortSignal): Promise<string> {
   try {
     if (!response.ok) throw new Error(`capture HTTP ${response.status}`);
-    if (!/^text\/html(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) throw new TypeError('capture response must be text/html');
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!/^text\/html(?:\s*;|$)/i.test(contentType)) throw new TypeError('capture response must be text/html');
+    for (const charset of contentType.matchAll(/;\s*charset\s*=\s*"?([^";\s]+)/gi)) {
+      if (charset[1]!.toLowerCase() !== 'utf-8') throw new TypeError('capture response must use UTF-8');
+    }
     const declared = response.headers.get('content-length');
     if (declared !== null && (!/^[0-9]+$/.test(declared) || BigInt(declared) > BigInt(maxBytes))) throw new RangeError('capture response exceeds maxBytes');
   } catch (error) { void response.body?.cancel().catch(() => undefined); throw error; }
@@ -172,6 +176,10 @@ export async function writeRenderedCollection(collection: RenderedCollection, op
   const rel = relative(root, directory);
   if (rel === '..' || rel.startsWith('..\\') || rel.startsWith('../') || isAbsolute(rel)) throw new TypeError('capture directory must stay inside Doctor root');
   if (options.inputs.length === 0) throw new TypeError('capture requires form projection inputs');
+  const realParent = await realpath(dirname(directory));
+  const realRoot = await realpath(root);
+  const realRel = relative(realRoot, realParent);
+  if (realRel === '..' || realRel.startsWith('..\\') || realRel.startsWith('../') || isAbsolute(realRel)) throw new TypeError('capture directory resolves outside Doctor root');
   for (const snapshot of collection.snapshots) {
     if (!/^[A-Za-z][A-Za-z0-9_-]{0,100}$/.test(snapshot.id) || snapshot.document.path !== `${snapshot.id}.html`) throw new TypeError('invalid captured snapshot filename');
   }
@@ -189,7 +197,6 @@ export async function writeRenderedCollection(collection: RenderedCollection, op
       releaseRequiredRuleGroups: config.releaseRequiredRuleGroups,
     } }, null, 2), { flag: 'wx' });
     // rename cannot replace a nonempty directory. Refuse even an existing empty target explicitly.
-    const { lstat } = await import('node:fs/promises');
     try { await lstat(directory); throw new Error('capture output directory already exists'); }
     catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error; }
     await rename(stage, directory);

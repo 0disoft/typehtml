@@ -73,6 +73,19 @@ describe('Doctor development integrations', () => {
     expect(reports).toBe(1);
   });
 
+  test('watch recovers when an initially invalid projection is repaired', async () => {
+    const { configPath, root } = await fixture();
+    const path = join(root, 'projection.json');
+    const original = await readFile(path, 'utf8');
+    await writeFile(path, '{');
+    const codes: number[] = [];
+    await watchDoctor(configPath, { signal: new AbortController().signal, intervalMs: 10, maxRuns: 2, onReport: async (report) => {
+      codes.push(report.exitCode);
+      if (codes.length === 1) await writeFile(path, original);
+    } });
+    expect(codes).toEqual([2, 0]);
+  });
+
   test('stdio LSP frames initialize, persisted diagnostics, shutdown and exit', async () => {
     const { configPath, htmlPath } = await fixture();
     await writeFile(htmlPath, validHtml.replace('name="name"', 'name="unknown"'));

@@ -43,4 +43,11 @@ describe('Doctor native choice controls', () => {
     expect([...result.unsupportedNames]).toEqual(['message', 'direction', 'file']);
     expect(result.unsupportedControls.map((item) => item.reason)).toEqual(['dirname', 'file-input']);
   });
+
+  test('does not claim disabled selected options guarantee supply, and preserves non-ASCII whitespace', () => {
+    const result = collect('<select name="choice" required><option disabled selected value="a">A</option><option>B</option></select>');
+    expect(result.possibleCounts.get('choice')).toBe(1);
+    expect(result.conditionalNames.has('choice')).toBe(true);
+    expect(collect('<select name="space"><option> &nbsp; X &nbsp; </option></select>').entries[0]?.value).toBe('\u00a0 X \u00a0');
+  });
 });
