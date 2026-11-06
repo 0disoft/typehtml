@@ -20,6 +20,12 @@ export interface FormEntry {
   readonly value: string;
 }
 
+/** Extra names/codecs are opt-in; legacy parsers keep rejecting duplicate scalars. */
+export interface FormEntryPolicy {
+  readonly names: readonly string[];
+  readonly repeatable?: readonly string[];
+}
+
 export interface ParsedForm {
   readonly entries: readonly FormEntry[];
   /** Business fields only; protocol fields have been removed. */
@@ -264,7 +270,13 @@ export async function readUrlEncodedEntries(
   request: Request,
   options: FormReadLimits,
   runtime: FormReadRuntime = {},
+  policy?: FormEntryPolicy,
 ): Promise<readonly FormEntry[]> {
+  const declared = new Set(policy?.names);
+  const repeatable = new Set(policy?.repeatable);
+  for (const key of repeatable) {
+    if (!declared.has(key) || key.startsWith('_')) throw new TypeError('repeatable fields must be declared business fields');
+  }
   assertFormTransport(request, options.maxBytes);
   const bytes = await readBoundedBody(request, options, runtime);
   const entries: FormEntry[] = [];
@@ -278,7 +290,7 @@ export async function readUrlEncodedEntries(
       while (split < end && bytes[split] !== 61) split++;
       const key = decodePart(bytes.subarray(start, split));
       const value = decodePart(bytes.subarray(split < end ? split + 1 : end, end));
-      if (deniedKeys.has(key) || (!businessKey.test(key) && !protocolKey.test(key))) {
+      if (deniedKeys.has(key) || (!businessKey.test(key) && !protocolKey.test(key) && !declared.has(key))) {
         throw new WireError(400, 'INVALID_KEY');
       }
       if (encoder.encode(key).length > options.maxKeyBytes) {
@@ -287,7 +299,7 @@ export async function readUrlEncodedEntries(
       if (encoder.encode(value).length > options.maxValueBytes) {
         throw new WireError(413, 'VALUE_TOO_LARGE');
       }
-      if (seen.has(key)) throw new WireError(400, 'DUPLICATE_KEY');
+      if (seen.has(key) && !repeatable.has(key)) throw new WireError(400, 'DUPLICATE_KEY');
       seen.add(key);
       entries.push(Object.freeze({ key, value }));
     }
