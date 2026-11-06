@@ -183,6 +183,13 @@ function checkSupply(
     );
   }
   for (const name of required) {
+    if (collection.conditionalNames.has(name)) {
+      checked = false;
+      collector.add(diagnosticUnknown('BC010', 'conditional-required-field', `${causeBase}/${name}/conditional`,
+        'conditional-required-field', `required field ${noteForName(name)} can be omitted by a native user choice; add native required validation or handle absence in the contract`,
+        fieldLocation(entriesByName.get(name)?.first.control)));
+      continue;
+    }
     if (entriesByName.has(name)) continue;
     if (collection.unsupportedNames.has(name) || form.hasDynamicControls) {
       checked = false;
@@ -495,7 +502,7 @@ function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: Co
   const location = submitter?.location ?? form.location;
   const resolved = resolveEffectiveTarget(form, submitter);
   const target = analyzeTarget(collector, bound, location, resolved);
-  const collection = collectFormEntries(form, submitter);
+  const collection = collectFormEntries(form, submitter, resolved.target?.skipValidation ?? false);
   const entriesByName = indexEntries(collection.entries);
   const fact = submissionFact(bound, submitter, activation, resolved, collection, entriesByName);
   if (!state.budget.acceptSubmission(fact)) return false;

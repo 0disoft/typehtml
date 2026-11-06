@@ -299,11 +299,11 @@ describe('Doctor form-link analysis', () => {
     expect(JSON.stringify(report)).not.toContain('private-csrf');
   });
 
-  test('does not turn unsupported choice controls into missing or duplicate scalar defects', async () => {
+  test('does not turn optional radio choices into missing or duplicate scalar defects', async () => {
     const config = await fixture({ html: html('<input type="hidden" name="_bc_csrf"><input type="hidden" name="_bc_request"><input type="radio" name="name" value="a"><input type="radio" name="name" value="b">') });
     const report = await runDoctor(config);
     expect(report.exitCode).toBe(3);
-    expect(report.findings.some((finding) => finding.subcode === 'unsupported-control-radio-input')).toBe(true);
+    expect(report.findings.some((finding) => finding.subcode === 'conditional-required-field')).toBe(true);
     expect(report.findings.some((finding) => finding.subcode === 'missing-required-field' || finding.subcode === 'duplicate-scalar')).toBe(false);
   });
 
@@ -312,7 +312,7 @@ describe('Doctor form-link analysis', () => {
     const report = await runDoctor(config);
     expect(report.exitCode).toBe(1);
     expect(report.findings.some((finding) => finding.subcode === 'external-origin')).toBe(true);
-    expect(report.findings.some((finding) => finding.subcode === 'unsupported-control-select')).toBe(true);
+    expect(report.findings.some((finding) => finding.subcode === 'unsupported-control-select')).toBe(false);
   });
 
   test('ignores datalist and reset controls while preserving first-legend fieldset exceptions', async () => {
@@ -387,7 +387,7 @@ describe('Doctor form-link analysis', () => {
     // Protocol supply errors still block an audit even when incomplete coverage is allowed.
     expect(report.exitCode).toBe(1);
     expect(report.coverage.some((row) => row.actualStatus === 'unknown')).toBe(true);
-    const auditOnly = await fixture({ html: html('<select name="name"></select><input type="hidden" name="_bc_csrf"><input type="hidden" name="_bc_request">'), audit: { releaseRequiresCompleteDeclaredBoundary: false } });
+    const auditOnly = await fixture({ html: html('<input type="radio" name="name"><input type="hidden" name="_bc_csrf"><input type="hidden" name="_bc_request">'), audit: { releaseRequiresCompleteDeclaredBoundary: false } });
     expect((await runDoctor(auditOnly)).exitCode).toBe(0);
   });
 

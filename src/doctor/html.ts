@@ -56,6 +56,8 @@ export interface CollectionResult {
   readonly possibleCounts: ReadonlyMap<string, number>;
   readonly unsupportedNames: ReadonlySet<string>;
   readonly unsupportedControls: readonly { readonly control: ControlFact; readonly reason: string }[];
+  /** A native user choice can omit these names even though a successful entry is possible. */
+  readonly conditionalNames: ReadonlySet<string>;
   readonly submitter: ControlFact | null;
 }
 
@@ -280,16 +282,40 @@ export function parseHtmlDocument(html: string, documentUrl: string, path = '<ht
   };
 }
 
-export function collectFormEntries(form: FormFact, submitter: ControlFact | null): CollectionResult {
+function textContent(node: P5Node): string {
+  if (node.nodeName === '#text') return (node as DefaultTreeAdapterTypes.TextNode).value;
+  return 'childNodes' in node ? node.childNodes.map(textContent).join('') : '';
+}
+
+function selectOptions(control: ControlFact): P5Element[] {
+  const elements: P5Element[] = [];
+  walkElements(control.element, elements);
+  return elements.filter((option) => option.tagName === 'option' && !hasAttribute(option, 'disabled') &&
+    !(parentOf(option)?.nodeName === 'optgroup' && hasAttribute(parentOf(option) as P5Element, 'disabled')));
+}
+
+/** Possible successful controls, not an exhaustive enumeration of every user-selected state. */
+export function collectFormEntries(form: FormFact, submitter: ControlFact | null, skipValidation = false): CollectionResult {
   const entries: HtmlEntry[] = [];
   const possibleCounts = new Map<string, number>();
   const unsupportedNames = new Set<string>();
+  const conditionalNames = new Set<string>();
   const unsupportedControls: { control: ControlFact; reason: string }[] = [];
+  const radioGroups = new Map<string, ControlFact[]>();
+  for (const control of form.controls) {
+    if (control.disabled || control.type !== 'radio' || control.name === null) continue;
+    const group = radioGroups.get(control.name);
+    if (group) group.push(control); else radioGroups.set(control.name, [control]);
+  }
+  const emittedRadioGroups = new Set<string>();
+  const append = (control: ControlFact, value: string, count = 1) => {
+    const name = control.name!;
+    possibleCounts.set(name, (possibleCounts.get(name) ?? 0) + count);
+    entries.push({ name, value, control, via: control === submitter ? 'submitter' : 'control' });
+  };
   for (const control of form.controls) {
     if (control.disabled) continue;
-    const unsupportedReason = control.tagName === 'select' || control.tagName === 'textarea'
-      ? control.tagName
-      : control.tagName === 'input' && ['checkbox', 'radio', 'file', 'image'].includes(control.type)
+    const unsupportedReason = control.tagName === 'input' && ['file', 'image'].includes(control.type)
         ? `${control.type}-input`
         : attribute(control.element, 'dirname') !== null ? 'dirname' : null;
     if (unsupportedReason !== null) {
@@ -304,15 +330,34 @@ export function collectFormEntries(form: FormFact, submitter: ControlFact | null
       if (control !== submitter) continue;
     }
     if (control.name === null) continue;
-    possibleCounts.set(control.name, (possibleCounts.get(control.name) ?? 0) + 1);
-    entries.push({
-      name: control.name,
-      value: attribute(control.element, 'value') ?? '',
-      control,
-      via: control === submitter ? 'submitter' : 'control',
-    });
+    if (control.type === 'radio') {
+      if (emittedRadioGroups.has(control.name)) continue;
+      emittedRadioGroups.add(control.name);
+      const group = radioGroups.get(control.name)!;
+      const representative = group.findLast((item) => hasAttribute(item.element, 'checked')) ?? group[0]!;
+      if (skipValidation || !group.some((item) => item.required)) conditionalNames.add(control.name);
+      append(representative, attribute(representative.element, 'value') ?? 'on');
+      continue;
+    }
+    if (control.type === 'checkbox') {
+      if (skipValidation || !control.required) conditionalNames.add(control.name);
+      append(control, attribute(control.element, 'value') ?? 'on');
+      continue;
+    }
+    if (control.tagName === 'select') {
+      const options = selectOptions(control);
+      if (options.length === 0) continue;
+      const selected = options.findLast((option) => hasAttribute(option, 'selected')) ?? options[0]!;
+      const size = Number(attribute(control.element, 'size') ?? 0);
+      if (control.multiple || size > 1) {
+        if (skipValidation || !control.required) conditionalNames.add(control.name);
+      }
+      append(control, attribute(selected, 'value') ?? textContent(selected).replace(/[\t\n\f\r ]+/g, ' ').trim(), control.multiple ? options.length : 1);
+      continue;
+    }
+    append(control, control.tagName === 'textarea' ? textContent(control.element).replace(/\r?\n/g, '\r\n') : attribute(control.element, 'value') ?? '');
   }
-  return { entries, possibleCounts, unsupportedNames, unsupportedControls, submitter };
+  return { entries, possibleCounts, unsupportedNames, unsupportedControls, conditionalNames, submitter };
 }
 export function findSubmitters(form: FormFact): ControlFact[] {
   return form.controls.filter((control) => {
