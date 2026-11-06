@@ -8,7 +8,7 @@ export interface IdempotencyClaim extends IdempotencyIdentity {
   readonly now: number;
   readonly expiresAt: number;
 }
-export type IdempotencyClaimResult = Readonly<{ status: 'claimed' }> | Readonly<{ status: 'replay'; json: string }> |
+export type IdempotencyClaimResult = Readonly<{ status: 'claimed' }> | Readonly<{ status: 'replay'; json: string; expiresAt: number }> |
   Readonly<{ status: 'busy' | 'conflict' | 'expired' | 'unknown' }>;
 type MaybePromise<T> = T | Promise<T>;
 
@@ -20,7 +20,7 @@ type MaybePromise<T> = T | Promise<T>;
 export interface IdempotencyStore {
   claim(claim: IdempotencyClaim, signal?: AbortSignal): MaybePromise<IdempotencyClaimResult>;
   complete(identity: IdempotencyIdentity, token: string, json: string, signal?: AbortSignal): MaybePromise<boolean>;
-  markUnknown(identity: IdempotencyIdentity, token: string): MaybePromise<boolean>;
+  markUnknown(identity: IdempotencyIdentity, token: string, signal?: AbortSignal): MaybePromise<boolean>;
 }
 
 export class IdempotencyError extends Error {
@@ -105,12 +105,41 @@ export function idempotencyField(key = createIdempotencyKey()): string {
 export interface ExecuteIdempotentOptions<T extends IdempotencyJson> extends IdempotencyIdentity {
   readonly store: IdempotencyStore;
   /** Rechecked for EVERY call, including replays; never cache an authorization decision. */
-  readonly authorize: () => MaybePromise<boolean>;
+  readonly authorize: (signal?: AbortSignal) => MaybePromise<boolean>;
   readonly execute: (signal?: AbortSignal) => MaybePromise<T>;
   readonly signal?: AbortSignal;
   readonly ttlMs?: number;
   readonly now?: () => number;
   readonly newToken?: () => string;
+  /** Per-operation deadline, including host callbacks and remote stores. Defaults to 30 seconds. */
+  readonly timeoutMs?: number;
+}
+
+/** Bound an adapter that ignores cancellation too; late settlements cannot win the already-failed call. */
+async function boundedOperation<T>(operation: (signal: AbortSignal) => MaybePromise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted();
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal!.reason);
+  signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(new IdempotencyError(503, 'IDEMPOTENCY_TIMEOUT', {
+    cause: new DOMException('idempotency operation exceeded its deadline', 'TimeoutError'),
+  })), timeoutMs);
+  let stop: (() => void) | undefined;
+  try {
+    const result = operation(controller.signal);
+    // Preserve a synchronous successful effect even if it observed a disconnect just before returning.
+    if (result === null || (typeof result !== 'object' && typeof result !== 'function') || !('then' in result)) return result;
+    return await new Promise<T>((resolve, reject) => {
+      stop = () => reject(controller.signal.reason);
+      controller.signal.addEventListener('abort', stop, { once: true });
+      Promise.resolve(result).then(resolve, reject);
+      if (controller.signal.aborted) stop();
+    });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+    if (stop !== undefined) controller.signal.removeEventListener('abort', stop);
+  }
 }
 
 /**
@@ -123,18 +152,30 @@ export async function executeIdempotent<T extends IdempotencyJson>(options: Exec
   assertIdempotencyIdentity(identity);
   const { signal, store, authorize, execute } = options;
   const newToken = options.newToken ?? createIdempotencyKey;
+  const clock = options.now ?? Date.now;
   signal?.throwIfAborted();
   const ttl = options.ttlMs ?? 86_400_000;
-  const now = (options.now ?? Date.now)();
-  if (!Number.isSafeInteger(ttl) || ttl <= 0 || !Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + ttl)) throw new RangeError('invalid idempotency clock or TTL');
-  if (await authorize() !== true) throw new IdempotencyError(403, 'IDEMPOTENCY_FORBIDDEN');
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  if (!Number.isSafeInteger(ttl) || ttl <= 0 || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) throw new RangeError('invalid idempotency TTL or timeout');
+  if (await boundedOperation(authorize, timeoutMs, signal) !== true) throw new IdempotencyError(403, 'IDEMPOTENCY_FORBIDDEN');
   signal?.throwIfAborted();
+  // Authorization may perform I/O; start the acceptance lifetime only after it finishes.
+  const now = clock();
+  if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + ttl)) throw new RangeError('invalid idempotency clock or TTL');
+  const currentTime = () => {
+    const measured = clock();
+    if (!Number.isSafeInteger(measured) || measured < now) throw new RangeError('invalid idempotency clock');
+    return measured;
+  };
   const token = newToken();
   const claim = Object.freeze({ ...identity, token, now, expiresAt: now + ttl });
   assertIdempotencyClaim(claim);
-  const result = await store.claim(claim, signal);
+  const result = await boundedOperation((operationSignal) => store.claim(claim, operationSignal), timeoutMs, signal);
+  if (result === null || typeof result !== 'object' || !Object.hasOwn(result, 'status')) throw new IdempotencyError(503, 'IDEMPOTENCY_CORRUPT_RESULT');
   if (result.status === 'replay') {
     signal?.throwIfAborted();
+    if (!Number.isSafeInteger(result.expiresAt) || result.expiresAt < 1) throw new IdempotencyError(503, 'IDEMPOTENCY_CORRUPT_RESULT');
+    if (currentTime() >= result.expiresAt) throw new IdempotencyError(410, 'IDEMPOTENCY_EXPIRED');
     let value: T;
     try { value = decodeResult<T>(result.json); }
     catch (cause) { throw new IdempotencyError(503, 'IDEMPOTENCY_CORRUPT_RESULT', { cause }); }
@@ -143,18 +184,21 @@ export async function executeIdempotent<T extends IdempotencyJson>(options: Exec
   if (result.status !== 'claimed') {
     signal?.throwIfAborted();
     if (result.status === 'expired') throw new IdempotencyError(410, 'IDEMPOTENCY_EXPIRED');
+    if (!['busy', 'conflict', 'unknown'].includes(result.status)) throw new IdempotencyError(503, 'IDEMPOTENCY_CORRUPT_RESULT');
     throw new IdempotencyError(409, `IDEMPOTENCY_${result.status.toUpperCase()}`);
   }
   try {
     signal?.throwIfAborted();
-    const value = await execute(signal);
+    if (currentTime() >= claim.expiresAt) throw new IdempotencyError(410, 'IDEMPOTENCY_EXPIRED');
+    const value = await boundedOperation(execute, timeoutMs, signal);
     const json = encodeIdempotencyValue(value);
     // Complete even if the caller disconnected after the effect, so a later authorized replay can recover.
-    if (!await store.complete(identity, token, json)) throw new IdempotencyError(503, 'IDEMPOTENCY_COMPLETION_UNCERTAIN');
+    if (await boundedOperation((operationSignal) => store.complete(identity, token, json, operationSignal), timeoutMs) !== true) throw new IdempotencyError(503, 'IDEMPOTENCY_COMPLETION_UNCERTAIN');
     signal?.throwIfAborted();
     return Object.freeze({ value: JSON.parse(json) as T, replayed: false });
   } catch (error) {
-    try { await store.markUnknown(identity, token); } catch { /* Pending also blocks retries; preserve the original failure. */ }
+    try { await boundedOperation((operationSignal) => store.markUnknown(identity, token, operationSignal), Math.min(timeoutMs, 1000)); }
+    catch { /* Pending also blocks retries; preserve the original failure. */ }
     signal?.throwIfAborted();
     throw error;
   }
@@ -178,7 +222,7 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
     if (current !== undefined) {
       if (current.digest !== claim.inputDigest) return { status: 'conflict' };
       if (claim.now >= current.expiresAt) return { status: 'expired' };
-      if (current.status === 'complete') return { status: 'replay', json: current.json! };
+      if (current.status === 'complete') return { status: 'replay', json: current.json!, expiresAt: current.expiresAt };
       return { status: current.status === 'unknown' ? 'unknown' : 'busy' };
     }
     if (this.records.size >= this.maxRecords) throw new IdempotencyError(503, 'IDEMPOTENCY_CAPACITY');
@@ -192,8 +236,8 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
     if (current === undefined || current.status !== 'pending' || current.token !== token || current.digest !== identity.inputDigest) return false;
     current.json = canonical; current.status = 'complete'; return true;
   }
-  markUnknown(identity: IdempotencyIdentity, token: string): boolean {
-    assertIdempotencyIdentity(identity);
+  markUnknown(identity: IdempotencyIdentity, token: string, signal?: AbortSignal): boolean {
+    signal?.throwIfAborted(); assertIdempotencyIdentity(identity);
     const current = this.records.get(this.key(identity));
     if (current === undefined || current.status !== 'pending' || current.token !== token || current.digest !== identity.inputDigest) return false;
     current.status = 'unknown'; return true;

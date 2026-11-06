@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +19,7 @@ describe('durable generic SQLite idempotency', () => {
       expect(b.claim({ ...claim, token: 'other_12345678901' })).toEqual({ status: 'busy' });
       expect(b.complete(claim, 'other_12345678901', '"wrong"')).toBe(false);
       expect(a.complete(claim, claim.token, '{"receipt":"r1"}')).toBe(true);
-      expect(b.claim(claim)).toEqual({ status: 'replay', json: '{"receipt":"r1"}' });
+      expect(b.claim(claim)).toEqual({ status: 'replay', json: '{"receipt":"r1"}', expiresAt: 200 });
       expect(b.claim({ ...claim, inputDigest: idempotencyDigest({ q: 2 }) })).toEqual({ status: 'conflict' });
       expect(b.claim({ ...claim, now: 200, expiresAt: 300 })).toEqual({ status: 'expired' });
     } finally { a.close(); b.close(); }
@@ -64,5 +65,43 @@ describe('durable generic SQLite idempotency', () => {
       expect(store.executeAtomic({ ...options, execute: (db) => { db.exec('CREATE TABLE rolled_back (id INTEGER) STRICT'); return 'receipt'; } })).toEqual({ value: 'receipt', replayed: false });
       expect(calls).toBe(1);
     } finally { store.close(); }
+  });
+
+  it('rejects native async callbacks before they can start an unrollbackable continuation', async () => {
+    const store = new SqliteIdempotencyStore(await filename()); let calls = 0;
+    const options = { ...claim, now: () => 100, authorize: () => true, execute: () => 'receipt' };
+    try {
+      expect(() => store.executeAtomic({ ...options, execute: (async () => { calls++; await Promise.resolve(); return 'late'; }) as never })).toThrow('synchronous');
+      expect(() => store.executeAtomic({ ...options, authorize: (async () => { calls++; return true; }) as never })).toThrow('synchronous');
+      expect(calls).toBe(0);
+      expect(store.executeAtomic(options).value).toBe('receipt');
+    } finally { store.close(); }
+  });
+
+  it('rejects corrupt durable states and malformed cached outcomes without executing effects', async () => {
+    const file = await filename(); const store = new SqliteIdempotencyStore(file); const db = new Database(file, { strict: true });
+    const options = { ...claim, now: () => 100, authorize: () => true, execute: () => { throw new Error('must not execute'); } };
+    try {
+      store.claim(claim); store.complete(claim, claim.token, '"receipt"');
+      db.query('UPDATE typehtml_idempotency SET outcome_json = ?').run('broken');
+      expect(() => store.executeAtomic(options)).toThrow('IDEMPOTENCY_CORRUPT_RESULT');
+      db.exec('PRAGMA ignore_check_constraints = ON');
+      db.query('UPDATE typehtml_idempotency SET state = ?').run('alien');
+      expect(() => store.claim(claim)).toThrow('IDEMPOTENCY_CORRUPT_RECORD');
+    } finally { db.close(); store.close(); }
+  });
+
+  it('closes the database if constructor setup fails', async () => {
+    let opened: Database | undefined;
+    const original = Database.prototype.exec;
+    const setup = spyOn(Database.prototype, 'exec').mockImplementation(function(this: Database, sql: string) {
+      if (sql.includes('CREATE TABLE IF NOT EXISTS typehtml_idempotency')) { opened = this; throw new Error('setup failed'); }
+      return Reflect.apply(original, this, [sql]);
+    });
+    try {
+      expect(() => new SqliteIdempotencyStore(':memory:')).toThrow('setup failed');
+      expect(opened).toBeDefined();
+      expect(() => opened!.query('SELECT 1').get()).toThrow();
+    } finally { setup.mockRestore(); }
   });
 });

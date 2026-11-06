@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { isAsyncFunction } from 'node:util/types';
 import {
   assertIdempotencyClaim, assertIdempotencyIdentity, createIdempotencyKey, encodeIdempotencyValue, IdempotencyError,
   type IdempotencyClaim, type IdempotencyClaimResult, type IdempotencyIdentity, type IdempotencyJson, type IdempotencyStore,
@@ -15,6 +16,7 @@ export class SqliteIdempotencyStore implements IdempotencyStore {
     try {
       db.exec('PRAGMA busy_timeout = 1000');
       if (filename !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+      db.exec('PRAGMA synchronous = FULL');
       db.exec(`CREATE TABLE IF NOT EXISTS typehtml_idempotency (
         scope TEXT NOT NULL, request_key TEXT NOT NULL, input_digest TEXT NOT NULL,
         token TEXT NOT NULL, expires_at INTEGER NOT NULL,
@@ -42,9 +44,14 @@ export class SqliteIdempotencyStore implements IdempotencyStore {
     const row = this.db.query('SELECT input_digest, token, expires_at, state, outcome_json FROM typehtml_idempotency WHERE scope = ? AND request_key = ?')
       .get(claim.scope, claim.key) as Row | null;
     if (row === null) throw new IdempotencyError(503, 'IDEMPOTENCY_MISSING_RECORD');
+    if (!/^[a-f0-9]{64}$/.test(row.input_digest) || !/^[A-Za-z0-9_-]{16,128}$/.test(row.token) ||
+        !Number.isSafeInteger(row.expires_at) || row.expires_at < 1 || !['pending', 'complete', 'unknown'].includes(row.state) ||
+        (row.state === 'complete' ? typeof row.outcome_json !== 'string' : row.outcome_json !== null)) {
+      throw new IdempotencyError(503, 'IDEMPOTENCY_CORRUPT_RECORD');
+    }
     if (row.input_digest !== claim.inputDigest) return { status: 'conflict' };
     if (claim.now >= row.expires_at) return { status: 'expired' };
-    if (row.state === 'complete') return { status: 'replay', json: row.outcome_json! };
+    if (row.state === 'complete') return { status: 'replay', json: row.outcome_json!, expiresAt: row.expires_at };
     return { status: row.state === 'unknown' ? 'unknown' : 'busy' };
   }
 
@@ -57,8 +64,8 @@ export class SqliteIdempotencyStore implements IdempotencyStore {
       .run(canonical, identity.scope, identity.key, identity.inputDigest, token).changes === 1;
   }
 
-  markUnknown(identity: IdempotencyIdentity, token: string): boolean {
-    assertIdempotencyIdentity(identity);
+  markUnknown(identity: IdempotencyIdentity, token: string, signal?: AbortSignal): boolean {
+    signal?.throwIfAborted(); assertIdempotencyIdentity(identity);
     return this.db.query(`UPDATE typehtml_idempotency SET state = 'unknown'
       WHERE scope = ? AND request_key = ? AND input_digest = ? AND token = ? AND state = 'pending'`)
       .run(identity.scope, identity.key, identity.inputDigest, token).changes === 1;
@@ -81,20 +88,27 @@ export class SqliteIdempotencyStore implements IdempotencyStore {
     assertIdempotencyIdentity(identity);
     const { signal } = options;
     signal?.throwIfAborted();
+    if (isAsyncFunction(options.execute) || isAsyncFunction(options.authorize)) throw new TypeError('executeAtomic callbacks must be synchronous');
     if (options.authorize() !== true) throw new IdempotencyError(403, 'IDEMPOTENCY_FORBIDDEN');
     signal?.throwIfAborted();
     const token = (options.newToken ?? createIdempotencyKey)();
     const ttl = options.ttlMs ?? 86_400_000;
     if (!Number.isSafeInteger(ttl) || ttl <= 0) throw new RangeError('invalid idempotency TTL');
     return this.db.transaction(() => {
+      signal?.throwIfAborted();
       const now = (options.now ?? Date.now)();
       const claim = { ...identity, token, now, expiresAt: now + ttl };
       assertIdempotencyClaim(claim);
       const result = this.claimInsideTransaction(claim);
       if (result.status === 'replay') {
-        if (result.json.length > 65_536) throw new IdempotencyError(503, 'IDEMPOTENCY_CORRUPT_RESULT');
-        const value = JSON.parse(result.json) as T;
-        encodeIdempotencyValue(value);
+        signal?.throwIfAborted();
+        let value: T;
+        try {
+          if (result.json.length > 65_536) throw new RangeError('idempotency JSON exceeds 64 KiB');
+          value = JSON.parse(result.json) as T;
+          encodeIdempotencyValue(value);
+        } catch (cause) { throw new IdempotencyError(503, 'IDEMPOTENCY_CORRUPT_RESULT', { cause }); }
+        signal?.throwIfAborted();
         return Object.freeze({ value, replayed: true });
       }
       if (result.status === 'expired') throw new IdempotencyError(410, 'IDEMPOTENCY_EXPIRED');

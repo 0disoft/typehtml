@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 import {
   createIdempotencyKey, encodeIdempotencyValue, executeIdempotent, idempotencyDigest, idempotencyField,
   InMemoryIdempotencyStore, type ExecuteIdempotentOptions, type IdempotencyClaim, type IdempotencyJson,
@@ -71,6 +71,98 @@ describe('generic idempotent effect boundary', () => {
     input.execute = () => 'mutated'; input.scope = 'changed'; release(true);
     expect(await pending).toEqual({ value: 'original', replayed: false });
   });
+
+  it('starts the acceptance lifetime after asynchronous authorization', async () => {
+    let now = 100; let calls = 0;
+    const input = { ...options(() => { calls++; return 'receipt'; }), ttlMs: 10, now: () => now, authorize: async () => { now = 1000; return true; } };
+    expect(await executeIdempotent(input)).toEqual({ value: 'receipt', replayed: false });
+    expect(calls).toBe(1);
+  });
+
+  it('does not run an effect when a slow claim exhausts its acceptance lifetime', async () => {
+    let now = 100; let calls = 0; const store = new InMemoryIdempotencyStore();
+    const input = { ...options(() => { calls++; return 'receipt'; }), ttlMs: 10, now: () => now, store: {
+      claim: async (value: IdempotencyClaim) => { const result = store.claim(value); now = 110; return result; },
+      complete: store.complete.bind(store), markUnknown: store.markUnknown.bind(store),
+    } };
+    await expect(executeIdempotent(input)).rejects.toMatchObject({ code: 'IDEMPOTENCY_EXPIRED' });
+    expect(calls).toBe(0);
+    expect(store.claim({ ...claim, now: 110, expiresAt: 200 }).status).toBe('expired');
+  });
+
+  it('does not return a cached outcome if it expires during a remote claim', async () => {
+    let now = 100; const store = new InMemoryIdempotencyStore(); store.claim(claim); store.complete(claim, claim.token, '"receipt"');
+    const input = { ...options(() => 'must not execute'), now: () => now, store: {
+      claim: async (value: IdempotencyClaim) => { const result = store.claim(value); now = 200; return result; },
+      complete: store.complete.bind(store), markUnknown: store.markUnknown.bind(store),
+    } };
+    await expect(executeIdempotent(input)).rejects.toMatchObject({ code: 'IDEMPOTENCY_EXPIRED' });
+  });
+
+  it('times out a remote store that ignores cancellation without retrying its claim', async () => {
+    const store = new InMemoryIdempotencyStore(); let claims = 0; let effects = 0;
+    const input = { ...options(() => { effects++; return 'receipt'; }), timeoutMs: 2, store: {
+      claim: (value: IdempotencyClaim) => { claims++; store.claim(value); return new Promise<never>(() => {}); },
+      complete: store.complete.bind(store), markUnknown: store.markUnknown.bind(store),
+    } };
+    await expect(executeIdempotent(input)).rejects.toMatchObject({ code: 'IDEMPOTENCY_TIMEOUT', cause: { name: 'TimeoutError' } });
+    expect(claims).toBe(1); expect(effects).toBe(0);
+    await expect(executeIdempotent({ ...input, store })).rejects.toMatchObject({ code: 'IDEMPOTENCY_BUSY' });
+  });
+
+  it('bounds a stalled effect, leaving late success unable to reopen the key', async () => {
+    let release!: (value: string) => void; let effects = 0;
+    const input = { ...options(() => { effects++; return new Promise<string>((resolve) => { release = resolve; }); }), timeoutMs: 2 };
+    await expect(executeIdempotent(input)).rejects.toMatchObject({ code: 'IDEMPOTENCY_TIMEOUT' });
+    release('late receipt'); await Promise.resolve();
+    await expect(executeIdempotent(input)).rejects.toMatchObject({ code: 'IDEMPOTENCY_UNKNOWN' });
+    expect(effects).toBe(1);
+  });
+
+  it('returns the exact abort reason when an authorization callback ignores its signal', async () => {
+    const controller = new AbortController(); const reason = { disconnected: true };
+    const input = { ...options(() => 'must not execute'), signal: controller.signal, authorize: () => new Promise<boolean>(() => {}) };
+    const pending = executeIdempotent(input); controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+  });
+
+  it('bounds uncertainty cleanup and preserves the original error', async () => {
+    const error = new Error('external failure'); const store = new InMemoryIdempotencyStore();
+    const input = { ...options(() => { throw error; }), timeoutMs: 2, store: {
+      claim: store.claim.bind(store), complete: store.complete.bind(store), markUnknown: () => new Promise<never>(() => {}),
+    } };
+    await expect(executeIdempotent(input)).rejects.toBe(error);
+    await expect(executeIdempotent({ ...input, store })).rejects.toMatchObject({ code: 'IDEMPOTENCY_BUSY' });
+  });
+
+  it('cleans all deadline timers after success, cancellation and timeout', async () => {
+    const originalSet = globalThis.setTimeout; const originalClear = globalThis.clearTimeout;
+    const active = new Set<ReturnType<typeof setTimeout>>();
+    const armed = spyOn(globalThis, 'setTimeout').mockImplementation(((...args: Parameters<typeof setTimeout>) => {
+      const timer = originalSet(...args); active.add(timer); return timer;
+    }) as typeof setTimeout);
+    const cleared = spyOn(globalThis, 'clearTimeout').mockImplementation(((timer: ReturnType<typeof setTimeout>) => {
+      active.delete(timer); originalClear(timer);
+    }) as typeof clearTimeout);
+    try {
+      await executeIdempotent(options(() => 'receipt')); expect(active.size).toBe(0);
+      const controller = new AbortController();
+      const pending = executeIdempotent({ ...options(() => 'no'), signal: controller.signal, authorize: () => new Promise<boolean>(() => {}) });
+      controller.abort('cancel'); await expect(pending).rejects.toBe('cancel'); expect(active.size).toBe(0);
+      await expect(executeIdempotent({ ...options(() => new Promise<never>(() => {})), timeoutMs: 2 })).rejects.toMatchObject({ code: 'IDEMPOTENCY_TIMEOUT' });
+      expect(active.size).toBe(0);
+    } finally { armed.mockRestore(); cleared.mockRestore(); }
+  });
+
+  it('fails closed on corrupt remote states and result encodings', async () => {
+    const store = new InMemoryIdempotencyStore();
+    for (const result of [null, { status: 'alien' }, { status: 'replay', expiresAt: NaN, json: '1' }, { status: 'replay', expiresAt: 200, json: 'broken' }]) {
+      await expect(executeIdempotent({ ...options(() => 'must not execute'), store: {
+        claim: () => result as never, complete: store.complete.bind(store), markUnknown: store.markUnknown.bind(store),
+      } })).rejects.toMatchObject({ status: 503 });
+    }
+    for (const timeoutMs of [0, NaN, 2_147_483_648]) await expect(executeIdempotent({ ...options(() => 'no'), timeoutMs })).rejects.toThrow('timeout');
+  });
 });
 
 describe('atomic local store and bounded JSON', () => {
@@ -80,7 +172,7 @@ describe('atomic local store and bounded JSON', () => {
     expect(store.complete(claim, 'wrong_token', '"receipt"')).toBe(false);
     expect(store.complete(claim, claim.token, '"receipt"')).toBe(true);
     expect(store.markUnknown(claim, claim.token)).toBe(false);
-    expect(store.claim({ ...claim, now: 199, expiresAt: 300 })).toEqual({ status: 'replay', json: '"receipt"' });
+    expect(store.claim({ ...claim, now: 199, expiresAt: 300 })).toEqual({ status: 'replay', json: '"receipt"', expiresAt: 200 });
     expect(store.claim({ ...claim, now: 200, expiresAt: 300 })).toEqual({ status: 'expired' });
     expect(store.claim({ ...claim, now: 201, expiresAt: 300 })).toEqual({ status: 'expired' });
   });
