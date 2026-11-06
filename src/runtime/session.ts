@@ -34,11 +34,11 @@ export class InMemorySessionStore implements SessionStore {
 
   create(principal: Principal): Session {
     const id = randomToken('sess_');
-    const session: Session = {
+    const session: Session = Object.freeze({
       id,
-      principal: { ...principal, sessionId: id },
+      principal: Object.freeze({ ...principal, sessionId: id }),
       csrfToken: randomToken('csrf_'),
-    };
+    });
     this.sessions.set(session.id, session);
     return session;
   }
