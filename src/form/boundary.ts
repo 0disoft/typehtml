@@ -130,6 +130,10 @@ export function createBoundaryHandler<Input, Output, Principal extends object, R
       const success = await invoke(hooks.success, options, [output]);
       return html(303, '', { Location: successLocation(success, url.origin) });
     } catch (error) {
+      if (error instanceof RateLimitUnavailableError || error instanceof IdempotencyError && error.status === 503) {
+        try { if (hooks.onError !== undefined) invoke(hooks.onError, options, [error, request]); } catch { /* Preserve the bounded failure. */ }
+        return failure(error.status, error.code);
+      }
       if (error instanceof RateLimitError) return failure(429, error.code, { 'Retry-After': String(error.retryAfterSeconds) });
       if (error instanceof WireError || error instanceof NegotiationError || error instanceof CsrfError || error instanceof FormHttpError || error instanceof IdempotencyError || error instanceof RateLimitUnavailableError) {
         return failure(error.status, error.code);

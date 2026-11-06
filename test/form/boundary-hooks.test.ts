@@ -64,3 +64,11 @@ test('stalled optional rate-limit hooks return a bounded503 rather than hanging'
   expect(response.status).toBe(503); expect(await response.text()).toContain('RATE_LIMIT_UNAVAILABLE');
 });
 
+test('reports the original remote limiter failure through onError without exposing it in HTML', async () => {
+  const cause = new Error('private store detail'); let observed: unknown;
+  const handle = createFormHandler(form, { ...base, rateLimit: () => { throw cause; }, onError: (error) => { observed = error; } });
+  const response = await handle(request());
+  expect(response.status).toBe(503); expect((observed as Error).cause).toBe(cause);
+  expect(await response.text()).not.toContain(cause.message);
+});
+

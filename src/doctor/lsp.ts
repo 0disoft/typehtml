@@ -1,15 +1,18 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { Readable, Writable } from 'node:stream';
 import { runDoctor } from './analyze.ts';
 import { loadDoctorConfig } from './config.ts';
 import { VERSION } from '../version.ts';
 
 const MAX_MESSAGE_BYTES = 1024 * 1024;
 interface RpcMessage { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> }
+/** Minimal stdio contract keeps Node type packages optional for other Doctor consumers. */
+export interface DoctorLspOutput {
+  write(chunk: Uint8Array, callback: (error?: Error | null) => void): unknown;
+}
 
 /** Persisted-snapshot diagnostics over stdio. Does not analyze unsaved JSX, execute app code, or discover routes. */
-export async function runDoctorLanguageServer(configPath: string, input: Readable, output: Writable): Promise<void> {
+export async function runDoctorLanguageServer(configPath: string, input: AsyncIterable<Uint8Array | string>, output: DoctorLspOutput): Promise<void> {
   let buffer = Buffer.alloc(0);
   let shutdown = false;
   let exited = false;
