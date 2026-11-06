@@ -69,13 +69,33 @@ export interface OriginPolicy {
   readonly allowedOrigins: readonly string[];
 }
 
-/** Origin with same-origin Referer fallback, plus Fetch Metadata rejection. */
-export function assertRequestOrigin(request: Request, policy: OriginPolicy): void {
-  const allowed = new Set(policy.allowedOrigins.map((value) => {
+type PreparedOrigins = Readonly<{ allowed: ReadonlySet<string> }> | Readonly<{ error: unknown }>;
+const preparedOrigins = new WeakMap<OriginPolicy, PreparedOrigins>();
+
+function compileOrigins(policy: OriginPolicy): ReadonlySet<string> {
+  return new Set(policy.allowedOrigins.map((value) => {
     const origin = normalizedOrigin(value, true);
     if (origin === null) throw new Error('INVALID_ALLOWED_ORIGIN');
     return origin;
   }));
+}
+
+/** Own an immutable policy snapshot; configuration errors retain request-time rejection. */
+export function prepareOriginPolicy(policy: OriginPolicy): OriginPolicy {
+  const prepared = Object.freeze({ allowedOrigins: Object.freeze([...policy.allowedOrigins]) });
+  try {
+    preparedOrigins.set(prepared, { allowed: compileOrigins(prepared) });
+  } catch (error) {
+    preparedOrigins.set(prepared, { error });
+  }
+  return prepared;
+}
+
+/** Origin with same-origin Referer fallback, plus Fetch Metadata rejection. */
+export function assertRequestOrigin(request: Request, policy: OriginPolicy): void {
+  const prepared = preparedOrigins.get(policy);
+  if (prepared !== undefined && 'error' in prepared) throw prepared.error;
+  const allowed = prepared?.allowed ?? compileOrigins(policy);
   const fetchSite = request.headers.get('sec-fetch-site');
   if (fetchSite !== null) {
     const normalized = fetchSite.trim().toLowerCase();

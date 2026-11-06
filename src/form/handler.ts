@@ -1,7 +1,7 @@
 import { SUPPORTED_CSRF_FIELD, SUPPORTED_REQUEST_KEY_FIELD, type ObjectSchema } from '../contract/types.ts';
 import { assertCsrfToken, CsrfError } from '../runtime/csrf.ts';
 import { validateBusinessInput, type InputIssue } from '../runtime/input.ts';
-import { acceptsHtml, assertRequestOrigin, NegotiationError } from '../runtime/negotiation.ts';
+import { acceptsHtml, assertRequestOrigin, prepareOriginPolicy, NegotiationError, type OriginPolicy } from '../runtime/negotiation.ts';
 import { validateOutputObject } from '../runtime/output.ts';
 import { assertFormTransport, readUrlEncodedForm, WireError } from '../runtime/wire.ts';
 import type { DefinedForm, InferSchema } from './definition.ts';
@@ -64,6 +64,7 @@ type HandlerConfig<I extends ObjectSchema, O extends ObjectSchema, Principal ext
   form: DefinedForm<I, O>;
   hooks: FormHandlerOptions<I, O, Principal, Result>;
   receiver: FormHandlerOptions<I, O, Principal, Result>;
+  originPolicy: OriginPolicy;
 }>;
 
 function invokeHook<Args extends unknown[], Value>(hook: (...args: Args) => Value, receiver: unknown, args: Args): Value {
@@ -90,7 +91,7 @@ export function createFormHandler<I extends ObjectSchema, O extends ObjectSchema
     execute: options.execute, project: options.project, success: options.success,
     invalid: options.invalid, onError: options.onError,
   });
-  const config = { form, hooks, receiver: options };
+  const config = { form, hooks, receiver: options, originPolicy: prepareOriginPolicy({ allowedOrigins: origins }) };
   return (request) => handleRequest(request, config);
 }
 
@@ -112,7 +113,7 @@ async function handleRequest<I extends ObjectSchema, O extends ObjectSchema, Pri
     const rejected = rejectRequest(request, url, form.path);
     if (rejected !== null) return rejected;
     assertFormTransport(request, form.limits.maxBytes);
-    assertRequestOrigin(request, { allowedOrigins: hooks.allowedOrigins });
+    assertRequestOrigin(request, config.originPolicy);
     const authenticated = await invokeHook(hooks.authenticate, receiver, [request]);
     if (authenticated === null) return failure(401, 'UNAUTHENTICATED');
     if (typeof authenticated !== 'object' || Array.isArray(authenticated)) throw new TypeError('authenticate must return a principal object or null');

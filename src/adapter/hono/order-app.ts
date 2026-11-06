@@ -4,7 +4,7 @@ import type { LoadedBoundaryContract } from '../../contract/types.ts';
 import { assertCsrfToken, CsrfError } from '../../runtime/csrf.ts';
 import { OrderFailure, type OrderCoordinator } from '../../runtime/order-coordinator.ts';
 import { assertFormTransport, formReadOptions, readUrlEncodedEntries, readUrlEncodedForm, WireError } from '../../runtime/wire.ts';
-import { acceptsHtml, assertRequestOrigin, NegotiationError } from '../../runtime/negotiation.ts';
+import { acceptsHtml, assertRequestOrigin, prepareOriginPolicy, NegotiationError } from '../../runtime/negotiation.ts';
 import type { Principal } from '../../runtime/order.ts';
 import { InMemoryActionRateLimiter, type ActionRateLimiter, type RateLimitDecision } from './rate-limit.ts';
 import {
@@ -45,6 +45,7 @@ type AppEnv = { Variables: { session: Session } };
 export function createOrderApp(options: OrderAppOptions) {
   const { loaded, coordinator, sessions, credentials, requestLimit } = options;
   const allowedOrigins = Object.freeze([...options.allowedOrigins]);
+  const originPolicy = prepareOriginPolicy({ allowedOrigins });
   const contract = loaded.contract;
   const configuredDemo = options.demo ?? {
     principal: { tenantId: 'tenant_1', subjectId: 'subject_1', sessionId: 'demo' },
@@ -97,7 +98,7 @@ export function createOrderApp(options: OrderAppOptions) {
   app.post('/login', async (c) => {
     assertAccept(c.req.raw);
     assertFormTransport(c.req.raw, contract.http.maxBytes);
-    assertRequestOrigin(c.req.raw, { allowedOrigins });
+    assertRequestOrigin(c.req.raw, originPolicy);
     if (credentials === undefined) return html(c, 404, renderErrorPage(404, 'NOT_FOUND'));
     const entries = await readUrlEncodedEntries(c.req.raw, contract.http);
     if (entries.some((entry) => !['tenantId', 'subjectId', 'password'].includes(entry.key))) {
@@ -120,7 +121,7 @@ export function createOrderApp(options: OrderAppOptions) {
   });
 
   app.post('/logout', (c) => {
-    assertRequestOrigin(c.req.raw, { allowedOrigins });
+    assertRequestOrigin(c.req.raw, originPolicy);
     const session = requireSession(c, sessions);
     sessions.revoke?.(session.id);
     c.header('Set-Cookie', clearSessionCookie(secureCookies));
@@ -181,7 +182,7 @@ export function createOrderApp(options: OrderAppOptions) {
   app.post(contract.page.intentInitialization.path, async (c) => {
     assertAccept(c.req.raw);
     assertFormTransport(c.req.raw, contract.http.maxBytes);
-    assertRequestOrigin(c.req.raw, { allowedOrigins });
+    assertRequestOrigin(c.req.raw, originPolicy);
     const session = requireSession(c, sessions);
     const parsed = await readUrlEncodedForm(
       c.req.raw,
@@ -199,7 +200,7 @@ export function createOrderApp(options: OrderAppOptions) {
   app.post(contract.http.path, async (c) => {
     assertAccept(c.req.raw);
     assertFormTransport(c.req.raw, contract.http.maxBytes);
-    assertRequestOrigin(c.req.raw, { allowedOrigins });
+    assertRequestOrigin(c.req.raw, originPolicy);
     const session = requireSession(c, sessions);
     const parsed = await readUrlEncodedForm(
       c.req.raw,
