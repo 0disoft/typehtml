@@ -1,6 +1,8 @@
 # Public API
 
-The `0.1.0-alpha.3` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
+The `0.1.0-alpha.4` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
+
+See [Developer tools](DEVELOPER_TOOLS.md) for `createFormHelpers`, `createFormMessages`, `resolveFormLocale`, native Request testing, static catalogs, and the optional VS Code saved-snapshot connection. These features are opt-in and preserve existing error formats.
 
 | Entry point | Purpose | Runtime |
 | --- | --- | --- |
@@ -8,6 +10,8 @@ The `0.1.0-alpha.3` API is ESM with TypeScript declarations. Import documented p
 | `@0disoft/typehtml/contract` | Advanced schema validation, strict JSON, digests, and original boundary-contract helpers | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/doctor` | Programmatic form snapshot analysis and report types | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/runtime` | Lower-level transport and validation primitives | Node.js 22+ / Bun 1.4+ |
+| `@0disoft/typehtml/testing` | Build real wire requests and submit to a supplied in-process handler | Node.js 22+ / Bun 1.4+ |
+| `@0disoft/typehtml/catalog` | Frozen catalog snapshots and escaped read-only HTML/JSON exports | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/adapters/web` | Hono, Astro, React Router and SvelteKit endpoint adapters | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/adapters/node` | Raw Node/Express and Fastify route adapters | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/sqlite/idempotency` | Durable generic idempotency and same-database atomic writes | Bun 1.4+ |

@@ -41,7 +41,7 @@ async function consumer(directory: string, manager: 'npm' | 'bun'): Promise<void
   const installed = join(directory, 'node_modules/@0disoft/typehtml');
   const packageInfo = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'));
   expect(packageInfo.version === manifest.version, `${manager}: installed package version differs`);
-  for (const unwanted of ['typescript', '@types/bun', '@types/node', 'zod', 'valibot', 'arktype']) {
+  for (const unwanted of ['typescript', '@types/bun', '@types/node', 'zod', 'valibot', 'arktype', 'vscode-languageclient', '@vscode/vsce']) {
     let exists = false;
     try { await access(join(directory, 'node_modules', unwanted)); exists = true; } catch { /* absent is expected */ }
     expect(!exists, `${manager}: package leaked development dependency ${unwanted}`);
@@ -65,6 +65,12 @@ async function consumer(directory: string, manager: 'npm' | 'bun'): Promise<void
     checks.push(`${manager}/${runtime}: root+contract+doctor+runtime imports, handler 303/422/403, CLI`);
   }
   await access(join(installed, 'docs/FORM_INTEGRATIONS.md'));
+  await access(join(installed, 'docs/DEVELOPER_TOOLS.md'));
+  await writeFile(join(directory, 'developer.mjs'), DEVELOPER_PROBE);
+  for (const [runtime, executable] of [['node', node], ['bun', bun]] as const) {
+    expect(JSON.parse(await run(`${manager}/${runtime} developer tools`, [executable!, 'developer.mjs'], directory)).passed === true, `${manager}/${runtime}: developer tools mismatch`);
+    checks.push(`${manager}/${runtime}: typed field helpers, native testing client, opt-in i18n and static catalog`);
+  }
   await writeFile(join(directory, 'extended.mjs'), EXTENDED_PROBE);
   for (const [runtime, executable] of [['node', node], ['bun', bun]] as const) {
     expect(JSON.parse(await run(`${manager}/${runtime} extended native forms`, [executable!, 'extended.mjs'], directory)).passed === true, `${manager}/${runtime}: extended form mismatch`);
@@ -112,6 +118,11 @@ async function starter(directory: string, installedCli: string): Promise<void> {
   const report = JSON.parse(await run('starter Node Doctor', [node!, cli, 'doctor', '--config', 'doctor.config.json'], directory));
   expect(report.exitCode === 0 && report.scope.paths === 1 && report.findings.length === 0, 'starter Doctor did not verify its form');
   checks.push('standalone init: Node generation/check, source hashes, Doctor 1 path/0 findings');
+  await writeFile(join(directory, 'catalog.config.json'), JSON.stringify({ format: 'typehtml-catalog/1', forms: ['form.json'] }));
+  const catalog = JSON.parse(await run('installed Node static catalog', [node!, cli, 'catalog', '--config', 'catalog.config.json', '--out-dir', 'form catalog'], directory));
+  expect(catalog.forms === 1 && catalog.status === 'written', 'installed static catalog failed');
+  expect((await readFile(join(directory, 'form catalog', 'index.html'), 'utf8')).includes('greeting.create'), 'installed catalog HTML missing form');
+  checks.push('installed Node catalog CLI: static JSON manifest to read-only HTML and JSON');
   const sarif = JSON.parse(await run('installed Node Doctor SARIF', [node!, cli, 'doctor', '--config', 'doctor.config.json', '--format', 'sarif'], directory));
   expect(sarif.version === '2.1.0' && sarif.runs.length === 1, 'installed Doctor SARIF mismatch');
   const port = await freePort();
@@ -279,7 +290,34 @@ finally{server.closeAllConnections?.();await new Promise((resolve,reject)=>serve
 console.log(JSON.stringify({passed:true}));
 `;
 
+const DEVELOPER_PROBE = `import assert from 'node:assert/strict';
+import { defineForm, createFormHandler, defineSchemaForm, createFormHelpers, createFormMessages, createFormState, resolveFormLocale } from '@0disoft/typehtml';
+import { createFormRequest, createFormTestClient } from '@0disoft/typehtml/testing';
+import { createFormCatalog, renderFormCatalog, serializeFormCatalog } from '@0disoft/typehtml/catalog';
+const schema={type:'object',additionalProperties:false,required:['name'],properties:{name:{type:'string',minLength:1,maxLength:3}}};
+const form=defineForm({id:'developer.submit',path:'/developer',input:schema,output:schema});
+const helper=createFormHelpers(form);assert.equal(helper.field('name').name,'name');assert.equal(helper.form().action,'/developer');assert.throws(()=>helper.field('typo'));
+let effects=0;
+const handler=createFormHandler(form,{allowedOrigins:['https://typehtml.test'],authenticate:()=>({}),csrfToken:()=>'explicit-token',authorize:()=>true,execute:({input})=>{effects++;return input},project:(value)=>value,success:()=>({location:'/done'})});
+const client=createFormTestClient(form,handler);
+assert.equal((await client.submit({csrfToken:'explicit-token',entries:[['name','Ada']]})).status,303);
+assert.equal((await client.submit({csrfToken:'wrong',entries:[['name','Ada']]})).status,403);
+assert.equal((await client.submit({csrfToken:'explicit-token',entries:[['name','Ada'],['name','Ada']]})).status,400);
+const invalid=await client.submit({csrfToken:'explicit-token',entries:[['name','Long'] ]});assert.equal(invalid.status,422);assert.match(await invalid.text(),/Long/);assert.equal(effects,1);
+assert.equal(new URL(createFormRequest(form).url).pathname,'/developer');
+const messages=createFormMessages('ko',{fields:form.input.schema.properties,labels:{name:'이름'}});
+const state=createFormState({name:'Long'},[{field:'name',code:'MAX_LENGTH',message:'original'}],{locale:'ko',messages});assert.match(state.fieldErrors.name[0],/3/);assert.equal(resolveFormLocale({supportedLocales:['en','ko'],fallbackLocale:'en',acceptLanguage:'ko-KR, en;q=0.8'}),'ko');
+const identity={'~standard':{version:1,vendor:'not-exported',validate:(value)=>({value})}};
+const rich=defineSchemaForm({id:'developer.rich',path:'/rich',fields:{'user.name':{type:'string'},tags:{type:'array',items:{type:'string'}}},input:identity,output:identity});
+assert.equal(createFormHelpers(rich).name('user.name'),'user.name');
+const catalog=createFormCatalog([form,rich],{title:'Developer <catalog>'});assert.equal(catalog.forms.length,2);assert.equal(catalog.forms[1].validation,'standard-schema-not-statically-analyzed');assert.ok(!serializeFormCatalog(catalog).includes('not-exported'));assert.match(renderFormCatalog(catalog),/Developer &lt;catalog&gt;/);
+console.log(JSON.stringify({passed:true}));
+`;
+
 const TYPE_PROBE = `import { defineForm, createFormHandler, type InferInput } from '@0disoft/typehtml';
+import { createFormHelpers, createFormMessages, resolveFormLocale } from '@0disoft/typehtml';
+import { createFormRequest, createFormTestClient } from '@0disoft/typehtml/testing';
+import { createFormCatalog, renderFormCatalog } from '@0disoft/typehtml/catalog';
 import { defineSchemaForm, createSchemaFormHandler, type StandardSchemaV1, type SchemaFormInput } from '@0disoft/typehtml';
 import { toHono, toAstro } from '@0disoft/typehtml/adapters/web';
 import { collectRenderedHtml, doctorToSarif, runDoctorLanguageServer } from '@0disoft/typehtml/doctor';
@@ -290,12 +328,21 @@ const richValue: SchemaFormInput<typeof rich>={name:'Ada'};
 // @ts-expect-error vendor schema output inference must remain precise
 const badRich: SchemaFormInput<typeof rich>={name:2};
 const richHandler=createSchemaFormHandler(rich,{allowedOrigins:['https://consumer.invalid'],authenticate:()=>({id:'p'}),csrfToken:()=>'token',authorize:({input})=>input.name.length>0,execute:({input})=>input,project:(input)=>input,success:()=>({location:'/done'})});
+createFormHelpers(rich).field('name');
+// @ts-expect-error undeclared wire names must fail in installed declarations
+createFormHelpers(rich).field('typo');
+const client=createFormTestClient(rich,richHandler);void client;void createFormRequest;
+const catalog=createFormCatalog([rich]);renderFormCatalog(catalog);
+createFormMessages('ko',{fields:rich.fields});resolveFormLocale({supportedLocales:['en','ko'],fallbackLocale:'en'});
 toHono(richHandler);toAstro(richHandler);void richValue;
 const outputTransform: StandardSchemaV1<{count:string},{count:number}>={'~standard':{version:1,vendor:'consumer',validate:(value)=>({value:{count:Number((value as {count:string}).count)}})}};
 const transformed=defineSchemaForm({id:'typed.transform',path:'/transform',fields:{name:{type:'string'}},input:schema,output:outputTransform});
 createSchemaFormHandler(transformed,{allowedOrigins:['https://consumer.invalid'],authenticate:()=>({}),csrfToken:()=>'token',authorize:()=>true,execute:()=>({count:'2'}),project:(value)=>value,success:({count})=>({location:'/done?count='+count.toFixed(0)})});
 const form = defineForm({ id: 'typed.submit', path: '/typed', input: { type: 'object', additionalProperties: false, required: ['name', 'quantity'], properties: { name: { type: 'string' }, quantity: { type: 'integer' }, choice: { type: 'string', enum: ['yes', 'no'] } } }, output: { type: 'object', additionalProperties: false, required: ['message'], properties: { message: { type: 'string' } } } });
 const valid: InferInput<typeof form> = { name: 'Ada', quantity: 2, choice: 'yes' };
+const fieldName:'quantity'=createFormHelpers(form).field('quantity').name;void fieldName;
+// @ts-expect-error legacy declaration keys must not widen into arbitrary strings
+createFormHelpers(form).name('typo');
 // @ts-expect-error the integer codec exposes decoded numbers, not wire strings
 const invalidWire: InferInput<typeof form> = { name: 'Ada', quantity: '2' };
 // @ts-expect-error required schema fields remain required

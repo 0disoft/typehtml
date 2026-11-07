@@ -4,6 +4,7 @@ export * from './handler.ts';
 export { escapeHtml } from './html.ts';
 export * from './attributes.ts';
 export * from './state.ts';
+export * from './i18n.ts';
 export * from './standard-schema.ts';
 export * from './fields.ts';
 export * from './schema-form.ts';

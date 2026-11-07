@@ -1,6 +1,6 @@
 {
   "name": "@0disoft/typehtml",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "type": "module",
   "description": "Typed native HTML forms, server validation, and form contract diagnostics",
   "license": "MIT",
@@ -40,6 +40,14 @@
       "types": "./dist/runtime/index.d.ts",
       "import": "./dist/runtime/index.js"
     },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
+    "./catalog": {
+      "types": "./dist/catalog/index.d.ts",
+      "import": "./dist/catalog/index.js"
+    },
     "./reference/order": {
       "types": "./dist/reference/order.d.ts",
       "bun": "./dist/reference/order.js",
@@ -67,7 +75,8 @@
     "CHANGELOG.md",
     "docs/GETTING_STARTED.md",
     "docs/API.md",
-    "docs/FORM_INTEGRATIONS.md"
+    "docs/FORM_INTEGRATIONS.md",
+    "docs/DEVELOPER_TOOLS.md"
   ],
   "publishConfig": {
     "access": "public",

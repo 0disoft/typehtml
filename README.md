@@ -4,7 +4,7 @@ Typed contracts for native HTML forms and server boundaries.
 
 `@0disoft/typehtml` connects typed input schemas, native URL-encoded forms, and server handlers. Use a flat JSON contract or a Standard Schema validator with explicit transport fields. It provides strict request parsing, typed decoded input, public output validation, and a Doctor CLI that finds form/contract mismatches. It uses ordinary HTML and standard `Request`/`Response` routes.
 
-The current package is **`0.1.0-alpha.3`**. Its public API can change before `1.0`. The npm name `typehtml` belongs to another project; this package uses the `@0disoft/typehtml` scope. Install the locally built tarball; registry publication is a separate decision.
+The current package is **`0.1.0-alpha.4`**. Its public API can change before `1.0`. The npm name `typehtml` belongs to another project; this package uses the `@0disoft/typehtml` scope. Install the locally built tarball; registry publication is a separate decision.
 
 ## Start a project
 
@@ -18,7 +18,7 @@ node dist/cli.js init ../my-typehtml-app
 
 cd ../my-typehtml-app
 # Replace this with the absolute path to the generated tarball.
-bun add /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.3.tgz
+bun add /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.4.tgz
 bun run generate
 bun run doctor
 bun run dev
@@ -66,9 +66,12 @@ typehtml doctor --config doctor.config.json --format sarif
 typehtml doctor --config doctor.config.json --format text --watch
 typehtml capture --config capture.json --out-dir snapshots
 typehtml lsp --config doctor.config.json
+typehtml catalog --config catalog.config.json --out-dir form-catalog
 ```
 
 `boundary` is a compatibility alias for the same CLI. Generation emits data and TypeScript types; it does not generate a server. Doctor defaults to one JSON report and does not execute application modules. Capture fetches only explicitly selected HTML states; watch and LSP start only when requested. See the [integration guide](docs/FORM_INTEGRATIONS.md) for complete options and examples.
+
+The [developer tools guide](docs/DEVELOPER_TOOLS.md) covers opt-in field-name type checking, native Request/Response test helpers, English/Korean validation messages, the separate local VS Code extension for saved HTML, and read-only HTML/JSON form catalogs. The existing form APIs and default responses are preserved.
 
 ## Support and responsibilities
 

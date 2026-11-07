@@ -1,6 +1,6 @@
 # Forms, framework integrations, and Doctor tooling
 
-This guide describes the additive `0.1.0-alpha.3` APIs. The existing `defineForm`, `createFormHandler`, JSON manifests, native 422 HTML responses, and successful 303 redirects remain supported. TypeHTML supplies a request boundary and diagnostics; your application supplies authentication, authorization, persistence, GET pages, and framework startup.
+This guide describes the additive `0.1.0-alpha.4` APIs. The existing `defineForm`, `createFormHandler`, JSON manifests, native 422 HTML responses, and successful 303 redirects remain supported. TypeHTML supplies a request boundary and diagnostics; your application supplies authentication, authorization, persistence, GET pages, and framework startup.
 
 The core, adapters, and Doctor run on Node.js 22+ and Bun 1.4+. The optional SQLite idempotency adapter requires Bun 1.4+. No validator library, application server, browser runtime, or reactive form model is bundled by the new form APIs.
 
@@ -9,9 +9,9 @@ The core, adapters, and Doctor run on Node.js 22+ and Bun 1.4+. The optional SQL
 Install the supplied archive in a consumer project. These commands install files; they do not publish to npm:
 
 ```sh
-npm install "./0disoft-typehtml-0.1.0-alpha.3.tgz" "zod@^4"
+npm install "./0disoft-typehtml-0.1.0-alpha.4.tgz" "zod@^4"
 # Or:
-bun add "./0disoft-typehtml-0.1.0-alpha.3.tgz" "zod@^4"
+bun add "./0disoft-typehtml-0.1.0-alpha.4.tgz" "zod@^4"
 ```
 
 Use an absolute archive path when the file is elsewhere. Zod is the example's application dependency. Valibot 1 and ArkType 2 Standard Schema implementations are also tested; install the validator you use rather than all three. TypeHTML does not load your validator library automatically.
@@ -22,9 +22,13 @@ Use an absolute archive path when the file is elsewhere. Zod is the example's ap
 | `@0disoft/typehtml/adapters/web` | Hono, Astro, React Router, and SvelteKit Request/Response bridges |
 | `@0disoft/typehtml/adapters/node` | Raw Node/Express listener and Fastify route factory |
 | `@0disoft/typehtml/doctor` | Analysis, rendered HTML capture, output formats, watch, stdio LSP |
+| `@0disoft/typehtml/testing` | Native Request construction and an in-process handler test client |
+| `@0disoft/typehtml/catalog` | Explicit form registration to read-only HTML and JSON |
 | `@0disoft/typehtml/sqlite/idempotency` | Bun-only durable generic SQLite idempotency store |
 
 Existing `/contract`, `/runtime`, and `/reference/order` entry points remain separate. Import package entry points, not implementation files under `dist`.
+
+The [developer tools guide](DEVELOPER_TOOLS.md) documents typed wire-field helpers, reusable English/Korean messages and explicit locale negotiation, native boundary test helpers, the optional VS Code saved-HTML extension, and static catalogs. The original APIs and default English errors remain unchanged.
 
 ## Define a Standard Schema form
 

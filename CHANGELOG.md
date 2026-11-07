@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.4 — Local developer tools
+
+- Add opt-in field-name type checking from explicit wire declarations, preserving existing dynamic helpers.
+- Add a separate testing entry point for native Request construction and in-process handler submission, including duplicate and malformed request cases.
+- Add reusable English/Korean validation messages using declared bounds and explicit quality-aware locale negotiation; retain default and opaque vendor messages.
+- Add read-only static form catalogs with bounded JSON/HTML exports and a static-manifest CLI command.
+- Add an independently packaged local VS Code extension connecting saved HTML snapshots to the existing Doctor LSP.
+- Extend fresh installed-package runtime and declaration checks. Keep npm and editor publication separate and unperformed.
+
 ## 0.1.0-alpha.3 — Local regression fixes
 
 - Stop canceled requests before starting business effects after asynchronous guards.
