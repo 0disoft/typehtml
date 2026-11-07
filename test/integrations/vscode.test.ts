@@ -5,6 +5,13 @@ import { join, resolve } from 'node:path';
 import { createLaunchPlan, validateLaunchFiles } from '../../integrations/vscode/src/config.ts';
 import { DoctorSessionManager, type ManagedClient } from '../../integrations/vscode/src/lifecycle.ts';
 import { DoctorProcess } from '../../integrations/vscode/src/process.ts';
+import { forwardSavedDocumentOpen, withoutDocumentText } from '../../integrations/vscode/src/snapshot.ts';
+import { pathToFileURL } from 'node:url';
+import { Readable, Writable } from 'node:stream';
+import { defineForm } from '../../src/form/definition.ts';
+import { loadForm, projectForm } from '../../src/form/manifest.ts';
+import { runDoctorLanguageServer } from '../../src/doctor/lsp.ts';
+import { readLspFrames } from '../../src/doctor/lsp-frames.ts';
 
 const root = resolve('workspace with spaces');
 
@@ -170,5 +177,84 @@ describe('VS Code owned transport process', () => {
     const transport = new DoctorProcess({ root: process.cwd(), command: '__typehtml_missing_node_executable__', args: [] });
     await expect(transport.launch()).rejects.toThrow();
     await transport.close();
+  });
+});
+
+describe('VS Code persisted-snapshot notifications', () => {
+  function packet(message: object): Buffer {
+    const body = Buffer.from(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    return Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]);
+  }
+
+  // Matches the installed language client's asOpenTextDocumentParams conversion.
+  function savedDocumentOpen(document: { uri: { toString(): string }; languageId: string; version: number; getText(): string }) {
+    const safe = withoutDocumentText(document);
+    return { textDocument: { uri: safe.uri.toString(), languageId: safe.languageId, version: safe.version, text: safe.getText() } };
+  }
+
+  test.each([false, true])('opens a document with dirty=%s without reading or sending buffer text', (isDirty) => {
+    const document = { uri: { toString: () => 'file:///workspace/form.html' }, languageId: 'html', version: 9, isDirty,
+      getText: () => { throw new Error('the editor buffer must not be read'); } };
+    Object.freeze(document);
+    expect(savedDocumentOpen(document)).toEqual({ textDocument: { uri: 'file:///workspace/form.html', languageId: 'html', version: 9, text: '' } });
+  });
+
+  test('retains metadata receivers and calls the normal client continuation for frozen documents', async () => {
+    class Document {
+      #version = 3;
+      readonly uri = { toString: () => 'file:///workspace/form.html' };
+      readonly languageId = 'html';
+      get version() { return this.#version; }
+      getText(): string { throw new Error('buffer should not be read'); }
+      metadataVersion() { return this.#version; }
+    }
+    const document = new Document();
+    Object.freeze(document);
+    const synced = new Map<string, Document>();
+    const next = async (forwarded: Document) => { synced.set(forwarded.uri.toString(), forwarded); };
+    await forwardSavedDocumentOpen(document, next);
+    const forwarded = synced.get(document.uri.toString())!;
+    expect(forwarded.version).toBe(3);
+    expect(forwarded.metadataVersion()).toBe(3);
+    expect(forwarded.getText()).toBe('');
+    expect(Object.isFrozen(document)).toBe(true);
+  });
+
+  test('a valid snapshot above the RPC limit remains analyzable and the server stays connected', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'typehtml-vscode-snapshot-'));
+    try {
+      const form = defineForm({ id: 'snapshot.submit', path: '/submit',
+        input: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string' } } },
+        output: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string' } } } });
+      const formPath = join(directory, 'form.json');
+      await writeFile(formPath, JSON.stringify(form.definition));
+      const loaded = await loadForm(formPath);
+      await writeFile(join(directory, 'projection.json'), JSON.stringify(projectForm(form, { sourcePath: 'form.json', sourceSha256: loaded.sourceSha256 })));
+      const htmlPath = join(directory, 'form.html');
+      const html = `<!--${'x'.repeat(1_500_000)}--><form id="test" method="post" action="/submit"><input name="unknown"><input type="hidden" name="_bc_csrf"><button>Send</button></form>`;
+      await writeFile(htmlPath, html);
+      const configPath = join(directory, 'doctor.json');
+      await writeFile(configPath, JSON.stringify({ format: 'boundary-doctor/0.5-draft', root: directory,
+        inputs: [{ kind: 'form-projection', path: 'projection.json' }],
+        documents: [{ path: 'form.html', documentUrl: 'https://example.test/form', sourceKind: 'snapshot', executionAssumption: 'native', bindings: [{ formId: 'test', actionId: form.id }] }],
+      }));
+      const document = { uri: pathToFileURL(htmlPath), languageId: 'html', version: 1, getText: () => html };
+      const oversized = packet({ method: 'textDocument/didOpen', params: { textDocument: { ...savedDocumentOpen(document).textDocument, text: html } } });
+      const readOld = async () => { for await (const _ of readLspFrames(Readable.from([oversized]))) { /* consume */ } };
+      await expect(readOld()).rejects.toThrow('message exceeds bounds');
+      const open = packet({ method: 'textDocument/didOpen', params: savedDocumentOpen(document) });
+      expect(open.byteLength).toBeLessThan(1024);
+      const chunks: Buffer[] = [];
+      const output = new Writable({ write(chunk, _encoding, callback) { chunks.push(Buffer.from(chunk)); callback(); } });
+      await runDoctorLanguageServer(configPath, Readable.from([
+        packet({ id: 1, method: 'initialize', params: {} }), open,
+        packet({ id: 2, method: 'shutdown' }), packet({ method: 'exit' }),
+      ]), output);
+      const messages: any[] = [];
+      for await (const body of readLspFrames(Readable.from(chunks))) messages.push(JSON.parse(body.toString()));
+      const diagnostics = messages.find((message) => message.method === 'textDocument/publishDiagnostics' && message.params.uri === document.uri.toString());
+      expect(diagnostics.params.diagnostics.some((item: any) => item.code === 'BC010')).toBe(true);
+      expect(messages.at(-1)).toMatchObject({ id: 2, result: null });
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });

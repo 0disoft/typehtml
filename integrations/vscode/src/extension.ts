@@ -3,6 +3,7 @@ import { CloseAction, ErrorAction, LanguageClient } from 'vscode-languageclient/
 import { createLaunchPlan, validateLaunchFiles, type LaunchPlan } from './config';
 import { DoctorSessionManager } from './lifecycle';
 import { DoctorProcess } from './process';
+import { forwardSavedDocumentOpen } from './snapshot';
 
 let sessions: DoctorSessionManager<LaunchPlan> | undefined;
 
@@ -20,8 +21,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       initializationFailedHandler: () => false,
       errorHandler: { error: () => ({ action: ErrorAction.Continue }), closed: () => ({ action: CloseAction.DoNotRestart }) },
       middleware: {
-        // The server reads disk. Avoid sending unsaved text even on didOpen.
-        didOpen: async (document, next) => { if (!document.isDirty) await next(document); },
+        // Sending a clean 1–2 MiB buffer would exceed the server's 1 MiB RPC cap.
+        didOpen: forwardSavedDocumentOpen,
       },
     });
     return {

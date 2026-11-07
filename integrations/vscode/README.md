@@ -12,7 +12,7 @@ application correctness.
 1. Install the TypeHTML `.tgz` in your application using `npm install <archive>`
    or `bun add <archive>`.
 2. In VS Code, choose **Extensions: Install from VSIX...** and select
-   `typehtml-vscode-0.1.0.vsix` from this repository's `artifacts/` directory.
+   `typehtml-vscode-0.1.1.vsix` from this repository's `artifacts/` directory.
 3. Open a trusted local workspace folder and configure its Doctor JSON path:
 
 ```json
@@ -26,6 +26,11 @@ Doctor** after changing the configuration JSON, contract files, or HTML files
 outside VS Code. Editing text without saving leaves diagnostics based on the
 last saved snapshot. For rendered applications, recapture HTML before saving
 or restarting Doctor.
+
+Open notifications contain only document metadata and an empty text placeholder;
+editor buffers are never uploaded. This also keeps saved snapshots between the
+1 MiB RPC limit and the supported 2 MiB document limit analyzable. Opening a dirty
+document refreshes diagnostics from its saved file rather than its unsaved text.
 
 All configuration and CLI paths must be relative to the workspace folder and
 remain inside it. `typehtml.cliPath` defaults to
