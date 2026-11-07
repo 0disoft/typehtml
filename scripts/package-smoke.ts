@@ -71,6 +71,9 @@ async function consumer(directory: string, manager: 'npm' | 'bun'): Promise<void
     expect(JSON.parse(await run(`${manager}/${runtime} developer tools`, [executable!, 'developer.mjs'], directory)).passed === true, `${manager}/${runtime}: developer tools mismatch`);
     checks.push(`${manager}/${runtime}: typed field helpers, native testing client, opt-in i18n and static catalog`);
   }
+  await writeFile(join(directory, 'editor-rpc.mjs'), await readFile(join(root, 'scripts/probes/editor-rpc.mjs'), 'utf8'));
+  expect(JSON.parse(await run(`${manager}/node installed editor LSP`, [node!, 'editor-rpc.mjs'], directory)).passed === true, `${manager}/node: saved snapshot LSP mismatch`);
+  checks.push(`${manager}/node: installed CLI LSP, 1.5 MiB saved HTML, metadata-only open, diagnostics and shutdown`);
   await writeFile(join(directory, 'extended.mjs'), EXTENDED_PROBE);
   for (const [runtime, executable] of [['node', node], ['bun', bun]] as const) {
     expect(JSON.parse(await run(`${manager}/${runtime} extended native forms`, [executable!, 'extended.mjs'], directory)).passed === true, `${manager}/${runtime}: extended form mismatch`);
