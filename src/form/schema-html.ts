@@ -16,7 +16,7 @@ export function getSchemaFieldProps(form: DefinedSchemaForm, name: string, optio
     const id = options.id ?? formFieldId(name);
     const invalid = (options.state?.fieldErrors[name]?.length ?? 0) > 0;
     return Object.freeze({ id, name, type: 'text', 'aria-invalid': invalid ? 'true' : undefined,
-      'aria-describedby': [options.describedBy, invalid ? `${formFieldId(name)}-error` : undefined].filter(Boolean).join(' ') || undefined });
+      'aria-describedby': [options.describedBy, invalid ? `${id}-error` : undefined].filter(Boolean).join(' ') || undefined });
   }
   if (item.type === 'boolean') {
     const raw = options.state?.rawValues[name];

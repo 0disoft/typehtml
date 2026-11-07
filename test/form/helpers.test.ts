@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import {
   createFormHelpers, createFormState, defineForm, defineSchemaForm, getFieldProps, getFormProps,
-  getSchemaFieldProps, type FormFieldName,
+  getSchemaFieldProps, formFieldId, renderFieldErrors, type FormFieldName,
 } from '../../src/index.ts';
 
 const form = defineForm({
@@ -115,5 +115,18 @@ describe('typed native form helpers', () => {
       // @ts-expect-error dynamic strings must be checked/narrowed by the caller
       createFormHelpers(form).name(dynamic);
     }).not.toThrow();
+  });
+
+  test('links repeated text fields to the error element belonging to their custom ID', () => {
+    const state = createFormState({ tags: ['a', 'b'] }, [{ field: 'tags', code: 'MAX_ITEMS', message: 'Choose fewer tags' }]);
+    const helper = createFormHelpers(rich);
+    const props = helper.field('tags', { control: 'text', id: 'profile-tags', describedBy: 'tags-hint', state });
+    expect(props.id).toBe('profile-tags');
+    expect(props['aria-invalid']).toBe('true');
+    expect(props['aria-describedby']).toBe('tags-hint profile-tags-error');
+    const errors = renderFieldErrors(state, 'tags', `${props.id}-error`);
+    expect(errors).toContain('id="profile-tags-error"');
+    expect(errors).toContain('Choose fewer tags');
+    expect(helper.field('tags', { control: 'text', state })['aria-describedby']).toBe(`${formFieldId('tags')}-error`);
   });
 });
