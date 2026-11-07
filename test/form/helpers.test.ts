@@ -24,6 +24,49 @@ const rich = defineSchemaForm({
 });
 
 describe('typed native form helpers', () => {
+  test('allows only shared names when a form has not been narrowed from a union', () => {
+    const alternative = defineForm({
+      id: 'alternative', path: '/alternative',
+      input: { type: 'object', additionalProperties: false, required: [], properties: {
+        name: { type: 'string' }, note: { type: 'string' },
+      } }, output: form.output,
+    });
+    const alternativeRich = defineSchemaForm({
+      id: 'alternative.rich', path: '/alternative-rich',
+      fields: { name: { type: 'string' }, note: { type: 'string' } }, input: z.unknown(), output: z.unknown(),
+    });
+    const sameKind = (selected: typeof form | typeof alternative) => {
+      const helper = createFormHelpers(selected);
+      const name: 'name' = helper.field('name').name;
+      if (false) {
+        // @ts-expect-error count does not exist in every possible form
+        helper.name('count');
+        // @ts-expect-error note does not exist in every possible form
+        helper.field('note');
+      }
+      return name;
+    };
+    const mixedKind = (selected: typeof form | typeof alternativeRich) => {
+      const helper = createFormHelpers(selected);
+      if (false) {
+        // @ts-expect-error a union of legacy and rich forms also requires a shared declaration
+        helper.field('count');
+      }
+      return helper.name('name');
+    };
+    const differentRich = (selected: typeof rich | typeof alternativeRich) => {
+      if (false) {
+        // @ts-expect-error these rich forms have no shared wire names
+        createFormHelpers(selected).field('user.name');
+        // @ts-expect-error an impossible form type cannot contribute any field names
+        const impossible: FormFieldName<never> = 'name';
+        void impossible;
+      }
+    };
+    expect([sameKind(form), sameKind(alternative), mixedKind(form), mixedKind(alternativeRich)]).toEqual(['name', 'name', 'name', 'name']);
+    differentRich(rich);
+  });
+
   test('preserves legacy props and literal names while rejecting typo names', () => {
     const helpers = createFormHelpers(form);
     const name: 'name' = helpers.name('name');

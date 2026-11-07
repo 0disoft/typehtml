@@ -5,10 +5,11 @@ import { getSchemaFieldProps } from './schema-html.ts';
 
 export type FormWithFields = DefinedForm | DefinedSchemaForm;
 
-/** Transport names come from explicit fields, before any Standard Schema transforms. */
-export type FormFieldName<Form extends FormWithFields> = Form extends DefinedSchemaForm
-  ? Extract<keyof Form['fields'], string>
-  : Form extends DefinedForm ? Extract<keyof Form['definition']['input']['properties'], string> : never;
+type FieldDeclarations<Form extends FormWithFields> = Form extends DefinedSchemaForm
+  ? Form['fields'] : Form extends DefinedForm ? Form['definition']['input']['properties'] : never;
+
+/** Wire names precede transforms; an unnarrowed union permits only names shared by every form. */
+export type FormFieldName<Form extends FormWithFields> = [Form] extends [never] ? never : Extract<keyof FieldDeclarations<Form>, string>;
 
 export interface FormHelpers<Form extends FormWithFields> {
   readonly form: () => HtmlAttributes;
