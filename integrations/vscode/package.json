@@ -1,0 +1,48 @@
+{
+  "name": "typehtml-doctor",
+  "displayName": "TypeHTML Doctor",
+  "description": "Doctor diagnostics for explicitly configured saved HTML snapshots",
+  "version": "0.1.0",
+  "publisher": "0disoft",
+  "private": true,
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/0disoft/typehtml.git" },
+  "engines": { "vscode": "^1.91.0", "node": ">=22" },
+  "categories": ["Linters"],
+  "main": "./dist/extension.cjs",
+  "extensionKind": ["workspace"],
+  "activationEvents": ["onLanguage:html"],
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": { "supported": false, "description": "Runs the workspace's locally installed TypeHTML CLI." }
+  },
+  "contributes": {
+    "commands": [{ "command": "typehtml.restartDoctor", "title": "TypeHTML: Restart Saved-Snapshot Doctor" }],
+    "configuration": {
+      "title": "TypeHTML",
+      "properties": {
+        "typehtml.doctorConfig": {
+          "type": "string", "default": "", "scope": "resource",
+          "description": "Doctor configuration JSON, relative to this workspace folder. Empty disables diagnostics. Only saved HTML snapshots listed by this config are analyzed."
+        },
+        "typehtml.cliPath": {
+          "type": "string", "default": "node_modules/@0disoft/typehtml/dist/cli.js", "scope": "resource",
+          "description": "Local TypeHTML CLI JavaScript file, relative to this workspace folder. Requires an installed TypeHTML package and Node.js 22+."
+        },
+        "typehtml.nodePath": {
+          "type": "string", "default": "node", "scope": "application",
+          "description": "Node.js 22+ executable. This setting can only be configured in user settings; arguments are not accepted."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "bun build src/extension.ts --target=node --format=cjs --external=vscode --outfile=dist/extension.cjs",
+    "typecheck": "tsc --noEmit",
+    "vscode:prepublish": "npm run typecheck && node scripts/prepare.cjs && npm run build",
+    "package": "vsce package --no-dependencies --out ../../artifacts/typehtml-vscode-0.1.0.vsix"
+  },
+  "dependencies": { "vscode-languageclient": "^11" },
+  "devDependencies": { "@types/node": "^22", "@types/vscode": "^1", "@vscode/vsce": "^4", "typescript": "^7" },
+  "overrides": { "minimatch": "^11" }
+}
