@@ -305,6 +305,7 @@ assert.equal((await client.submit({csrfToken:'wrong',entries:[['name','Ada']]}))
 assert.equal((await client.submit({csrfToken:'explicit-token',entries:[['name','Ada'],['name','Ada']]})).status,400);
 const invalid=await client.submit({csrfToken:'explicit-token',entries:[['name','Long'] ]});assert.equal(invalid.status,422);assert.match(await invalid.text(),/Long/);assert.equal(effects,1);
 assert.equal(new URL(createFormRequest(form).url).pathname,'/developer');
+const raw=createFormRequest(form,{rawBody:'name=%ZZ&note=한글😀'});assert.equal(raw.headers.get('content-type'),null);assert.equal(await raw.text(),'name=%ZZ&note=한글😀');
 const messages=createFormMessages('ko',{fields:form.input.schema.properties,labels:{name:'이름'}});
 const state=createFormState({name:'Long'},[{field:'name',code:'MAX_LENGTH',message:'original'}],{locale:'ko',messages});assert.match(state.fieldErrors.name[0],/3/);assert.equal(resolveFormLocale({supportedLocales:['en','ko'],fallbackLocale:'en',acceptLanguage:'ko-KR, en;q=0.8'}),'ko');
 const identity={'~standard':{version:1,vendor:'not-exported',validate:(value)=>({value})}};

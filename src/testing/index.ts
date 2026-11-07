@@ -32,11 +32,12 @@ export function createFormRequest(form: FormTestTarget, options: FormRequestOpti
   const headers = new Headers(options.headers);
   if (options.sendOrigin !== false && !headers.has('origin')) headers.set('origin', origin);
   const method = options.method ?? 'POST';
-  let body: string | undefined;
+  let body: BodyInit | undefined;
   if (options.rawBody !== undefined) {
     if (options.entries !== undefined || options.csrfToken !== undefined || options.requestKey !== undefined) throw new TypeError('rawBody cannot be combined with encoded form options');
     // Raw negative cases must choose their own Content-Type, including intentionally absent/wrong ones.
-    body = options.rawBody;
+    // A string body makes Node's Fetch synthesize text/plain; bytes keep absent headers absent.
+    body = new TextEncoder().encode(options.rawBody);
   } else if (method.toUpperCase() !== 'GET' && method.toUpperCase() !== 'HEAD') {
     const entries = new URLSearchParams();
     if (options.csrfToken !== undefined) entries.append('_bc_csrf', options.csrfToken);

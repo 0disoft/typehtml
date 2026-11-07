@@ -104,6 +104,26 @@ describe('native Request testing helpers', () => {
     await expect(tester.submit()).rejects.toBe(reason);
   });
 
+  test('keeps raw Content-Type absent on Node and Bun while preserving explicit media types', async () => {
+    const rawBody = 'name=%ZZ&note=한글😀';
+    const request = createFormRequest(form, { rawBody });
+    expect(request.headers.get('content-type')).toBeNull();
+    expect(await request.text()).toBe(rawBody);
+    const source = new Bun.Transpiler({ loader: 'ts' }).transformSync(await Bun.file(new URL('../../src/testing/index.ts', import.meta.url)).text());
+    const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+    const probe = `import assert from 'node:assert/strict';
+      const { createFormRequest } = await import(${JSON.stringify(moduleUrl)});
+      const rawBody = ${JSON.stringify(rawBody)};
+      for (const mediaType of [undefined, 'application/x-www-form-urlencoded', 'application/json']) {
+        const request = createFormRequest({ path: '/test' }, { rawBody, ...(mediaType === undefined ? {} : { headers: { 'Content-Type': mediaType } }) });
+        assert.equal(request.headers.get('content-type'), mediaType ?? null);
+        assert.equal(await request.text(), rawBody);
+      }`;
+    const result = Bun.spawnSync(['node', '--input-type=module', '-e', probe], { stdout: 'pipe', stderr: 'pipe' });
+    expect(result.stderr.toString()).toBe('');
+    expect(result.exitCode).toBe(0);
+  });
+
   test('rejects unsafe test origins and snapshots the client target', async () => {
     for (const value of ['https://app.test/', 'https://app.test/path', 'https://user:password@app.test', 'file:///tmp/test', 'https://app.test?x=1', 'https://app.test#fragment']) {
       expect(() => createFormRequest(form, { origin: value })).toThrow(TypeError);
