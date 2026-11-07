@@ -1,7 +1,7 @@
 import { mkdir, open, realpath, rm, rmdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { readStrictJson } from '../contract/strict-json.ts';
-import { loadForm } from '../form/manifest.ts';
+import { DEFAULT_MAX_BYTES, decodeStrictJson, readBoundedJsonBytes, StrictJsonError } from '../contract/strict-json.ts';
+import { defineForm, FORM_FORMAT, type FormDefinition } from '../form/definition.ts';
 import { createFormCatalog, renderFormCatalog, serializeFormCatalog, CATALOG_FORMAT, CATALOG_LIMITS } from './index.ts';
 
 function contained(root: string, path: string): boolean {
@@ -10,12 +10,23 @@ function contained(root: string, path: string): boolean {
 }
 function missing(error: unknown): boolean { return error instanceof Error && 'code' in error && error.code === 'ENOENT'; }
 
+async function readSource(path: string, remaining: number): Promise<Uint8Array> {
+  try { return await readBoundedJsonBytes(path, Math.min(DEFAULT_MAX_BYTES, remaining)); }
+  catch (error) {
+    if (remaining < DEFAULT_MAX_BYTES && error instanceof StrictJsonError && error.code === 'JSON_TOO_LARGE') {
+      throw new TypeError('catalog source byte limit exceeded', { cause: error });
+    }
+    throw error;
+  }
+}
+
 /** Static manifests are read as bounded JSON. No imported application module or server is run. */
 export async function writeFormCatalog(options: Readonly<{ configPath: string; directory: string }>): Promise<Readonly<{
   format: typeof CATALOG_FORMAT; status: 'written'; files: readonly string[]; forms: number;
 }>> {
   const configPath = await realpath(resolve(options.configPath));
-  const config = await readStrictJson(configPath);
+  const configBytes = await readSource(configPath, CATALOG_LIMITS.maxSourceBytes);
+  const config = decodeStrictJson(configBytes);
   if (config === null || typeof config !== 'object' || Array.isArray(config) || config.format !== CATALOG_FORMAT
     || Object.keys(config).some((key) => !['format', 'title', 'forms'].includes(key))
     || !Array.isArray(config.forms) || config.forms.length === 0 || config.forms.length > CATALOG_LIMITS.maxForms
@@ -23,12 +34,28 @@ export async function writeFormCatalog(options: Readonly<{ configPath: string; d
     || (config.title !== undefined && typeof config.title !== 'string')) throw new TypeError('invalid catalog config');
   const root = dirname(configPath);
   const sourcePaths: string[] = [configPath];
+  const seenPaths = new Set<string>();
+  const ids = new Set<string>();
+  const routes = new Set<string>();
+  let sourceBytes = configBytes.byteLength;
   const forms = [];
   for (const path of config.forms as string[]) {
+    if (sourceBytes >= CATALOG_LIMITS.maxSourceBytes) throw new TypeError('catalog source byte limit exceeded');
     const sourcePath = await realpath(resolve(root, path));
     if (!contained(root, sourcePath)) throw new TypeError('catalog manifest must be within the config directory');
+    if (seenPaths.has(sourcePath)) throw new TypeError('duplicate catalog manifest');
+    seenPaths.add(sourcePath);
+    const bytes = await readSource(sourcePath, CATALOG_LIMITS.maxSourceBytes - sourceBytes);
+    sourceBytes += bytes.byteLength;
+    const value = decodeStrictJson(bytes, { integerOnly: true });
+    if (value === null || typeof value !== 'object' || Array.isArray(value) || value.format !== FORM_FORMAT) {
+      throw new TypeError(`expected a ${FORM_FORMAT} manifest`);
+    }
+    const form = defineForm(value as unknown as FormDefinition);
+    if (ids.has(form.id) || routes.has(form.path)) throw new TypeError('duplicate catalog form ID or route');
+    ids.add(form.id); routes.add(form.path);
     sourcePaths.push(sourcePath);
-    forms.push((await loadForm(sourcePath)).form);
+    forms.push(form);
   }
   const catalog = createFormCatalog(forms, { title: config.title as string | undefined });
   const files = new Map([['catalog.json', serializeFormCatalog(catalog)], ['index.html', renderFormCatalog(catalog)]]);

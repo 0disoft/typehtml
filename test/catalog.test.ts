@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createFormCatalog, renderFormCatalog, serializeFormCatalog, CATALOG_LIMITS } from '../src/catalog/index.ts';
 import { writeFormCatalog } from '../src/catalog/files.ts';
-import { defineForm } from '../src/form/definition.ts';
+import { defineForm, type DefinedForm } from '../src/form/definition.ts';
 import { defineSchemaForm } from '../src/form/schema-form.ts';
+import { DEFAULT_MAX_BYTES } from '../src/contract/strict-json.ts';
 
 const schema = { type: 'object', additionalProperties: false, required: ['name'], properties: {
   name: { type: 'string', minLength: 1, maxLength: 80 }, count: { type: 'integer', minimum: 0, maximum: 99 },
@@ -62,6 +63,36 @@ describe('read-only form catalog', () => {
     const huge = { ...createFormCatalog([form]), title: 'x'.repeat(CATALOG_LIMITS.maxBytes) };
     expect(() => serializeFormCatalog(huge)).toThrow('byte limit');
   });
+
+  it('accepts the exact UTF-8 JSON limit and stops before later forms at one byte over', () => {
+    const sized = (index: number, value: string) => defineForm({ ...definition, id: `sized${index}`, path: `/sized${index}`,
+      input: { ...schema, properties: { name: { type: 'string', const: value } } } });
+    const prefix = Array.from({ length: 7 }, (_, index) => sized(index, 'x'.repeat(1_000_000)));
+    const unicode = '한글😀\n\\"';
+    const initial = [...prefix, sized(7, unicode)];
+    const options = { title: 'UTF-8 한글 "catalog"' };
+    const initialBytes = new TextEncoder().encode(serializeFormCatalog(createFormCatalog(initial, options))).byteLength;
+    const padding = 'x'.repeat(CATALOG_LIMITS.maxBytes - initialBytes);
+    const exact = [...prefix, sized(7, unicode + padding)];
+    expect(new TextEncoder().encode(serializeFormCatalog(createFormCatalog(exact, options))).byteLength).toBe(CATALOG_LIMITS.maxBytes);
+    const oversized: DefinedForm[] = [...prefix, sized(7, unicode + padding + 'x')];
+    let laterRead = false;
+    Object.defineProperty(oversized, 8, { get: () => { laterRead = true; throw new Error('later form must not be accessed'); } });
+    expect(() => createFormCatalog(oversized, options)).toThrow('catalog byte limit exceeded');
+    expect(laterRead).toBe(false);
+  });
+
+  it('checks the field count before accessing overflowing field schemas', () => {
+    const fields = Object.fromEntries(Array.from({ length: 1_024 }, (_, index) => [`field${index}`, { type: 'string' as const }]));
+    const validator = { '~standard': { version: 1 as const, vendor: 'test', validate: (value: unknown) => ({ value }) } };
+    const accepted = Array.from({ length: 8 }, (_, index) => defineSchemaForm({ id: `bounded${index}`, path: `/bounded${index}`, fields, input: validator, output: validator }));
+    let schemaRead = false;
+    const overflow = { ...accepted[0]!, id: 'overflow', path: '/overflow', fields: new Proxy(fields, {
+      get: () => { schemaRead = true; throw new Error('overflowing schema must not be accessed'); },
+    }) };
+    expect(() => createFormCatalog([...accepted, overflow])).toThrow('catalog field limit exceeded');
+    expect(schemaRead).toBe(false);
+  });
 });
 
 describe('static catalog files and CLI', () => {
@@ -100,6 +131,36 @@ describe('static catalog files and CLI', () => {
     const nestedConfig = join(root, 'nested', 'config.json');
     await writeFile(nestedConfig, JSON.stringify({ format: 'typehtml-catalog/1', forms: ['./escape/form.json'] }));
     await expect(writeFormCatalog({ configPath: nestedConfig, directory })).rejects.toThrow('within');
+  }));
+
+  it('enforces the exact cumulative source limit before parsing later files', async () => fixture(async (root, configPath) => {
+    const paths = Array.from({ length: 4 }, (_, index) => `./sized${index}.json`);
+    const config = JSON.stringify({ format: 'typehtml-catalog/1', forms: paths });
+    const configBytes = new TextEncoder().encode(config).byteLength;
+    await writeFile(configPath, config);
+    const texts = paths.map((_, index) => JSON.stringify({ ...definition, id: `source${index}`, path: `/source${index}` }));
+    for (let index = 0; index < paths.length; index++) {
+      const bytes = index < 3 ? DEFAULT_MAX_BYTES : CATALOG_LIMITS.maxSourceBytes - configBytes - 3 * DEFAULT_MAX_BYTES;
+      const text = texts[index]!;
+      await writeFile(join(root, paths[index]!), text + ' '.repeat(bytes - new TextEncoder().encode(text).byteLength));
+    }
+    expect((await writeFormCatalog({ configPath, directory: join(root, 'exact source limit') })).forms).toBe(4);
+    const lastPath = join(root, paths[3]!);
+    await writeFile(lastPath, (await readFile(lastPath, 'utf8')) + ' ');
+    await expect(writeFormCatalog({ configPath, directory: join(root, 'one byte over') })).rejects.toThrow('catalog source byte limit exceeded');
+    await writeFile(configPath, JSON.stringify({ format: 'typehtml-catalog/1', forms: [...paths, './missing-later.json'] }));
+    await expect(writeFormCatalog({ configPath, directory: join(root, 'skip later file') })).rejects.toThrow('catalog source byte limit exceeded');
+  }));
+
+  it('rejects repeated sources and duplicate IDs/routes before loading later manifests', async () => fixture(async (root, configPath) => {
+    for (const second of ['./form.json', './duplicate.json']) {
+      await writeFile(join(root, 'duplicate.json'), JSON.stringify(definition));
+      await writeFile(configPath, JSON.stringify({ format: 'typehtml-catalog/1', forms: ['./form.json', second, './missing-later.json'] }));
+      await expect(writeFormCatalog({ configPath, directory: join(root, 'no output') })).rejects.toThrow('duplicate catalog');
+    }
+    await writeFile(join(root, 'duplicate.json'), JSON.stringify({ ...definition, id: 'different.id' }));
+    await writeFile(configPath, JSON.stringify({ format: 'typehtml-catalog/1', forms: ['./form.json', './duplicate.json', './missing-later.json'] }));
+    await expect(writeFormCatalog({ configPath, directory: join(root, 'no output') })).rejects.toThrow('duplicate catalog form ID or route');
   }));
 
   it('exposes catalog help, produces JSON success and reports usage/errors with exit 2', async () => fixture(async (root, configPath) => {

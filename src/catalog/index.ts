@@ -4,7 +4,8 @@ import type { FormField } from '../form/fields.ts';
 import type { FormReadLimits } from '../runtime/wire.ts';
 
 export const CATALOG_FORMAT = 'typehtml-catalog/1';
-export const CATALOG_LIMITS = Object.freeze({ maxForms: 256, maxFields: 8_192, maxTitleLength: 200, maxBytes: 8 * 1_024 * 1_024 });
+export const CATALOG_LIMITS = Object.freeze({ maxForms: 256, maxFields: 8_192, maxTitleLength: 200,
+  maxBytes: 8 * 1_024 * 1_024, maxSourceBytes: 8 * 1_024 * 1_024 });
 export type CatalogForm = DefinedForm | DefinedSchemaForm;
 export interface CatalogField {
   readonly name: string;
@@ -36,29 +37,38 @@ export function createFormCatalog(forms: readonly CatalogForm[], options: Readon
   const ids = new Set<string>();
   const routes = new Set<string>();
   let fieldCount = 0;
-  const entries = forms.map((form): CatalogEntry => {
+  const catalog: FormCatalog = { format: CATALOG_FORMAT, title, forms: [], applicationCompleteness: 'not-evaluated' };
+  let bytes = new TextEncoder().encode(serializeFormCatalog(catalog)).byteLength;
+  const entries: CatalogEntry[] = [];
+  for (const form of forms) {
     if (ids.has(form.id) || routes.has(form.path)) throw new TypeError('duplicate catalog form ID or route');
     ids.add(form.id); routes.add(form.path);
     const rich = 'kind' in form;
     const required = new Set(rich ? [] : form.input.schema.required);
     const declarations: Readonly<Record<string, FormField>> = rich ? form.fields : form.input.schema.properties;
-    const fields = Object.entries(declarations).map(([name, schema]) => ({
-      name, required: rich ? (schema as FormField).required === true : required.has(name),
-      schema: structuredClone(schema),
-    }));
-    fieldCount += fields.length;
+    const names = Object.keys(declarations);
+    fieldCount += names.length;
     if (fieldCount > CATALOG_LIMITS.maxFields) throw new TypeError('catalog field limit exceeded');
+    const fields = names.map((name) => ({
+      name, required: rich ? declarations[name]!.required === true : required.has(name),
+      schema: declarations[name]!,
+    }));
     const protocol = rich ? form.protocol : form.definition.protocol;
-    return {
+    const entry: CatalogEntry = {
       id: form.id, method: 'POST', path: form.path, encoding: 'application/x-www-form-urlencoded', fields,
       protocolFields: protocol?.requestKey === 'required' ? ['_bc_csrf', '_bc_request'] : ['_bc_csrf'],
       limits: { ...form.limits }, validation: rich ? 'standard-schema-not-statically-analyzed' : 'static-json-profile',
     };
-  });
-  const catalog: FormCatalog = { format: CATALOG_FORMAT, title, forms: entries, applicationCompleteness: 'not-evaluated' };
-  // Bound export size before rendering; callbacks, tokens, and validator internals are never copied.
-  serializeFormCatalog(catalog);
-  return freeze(catalog);
+    // Count the exact pretty-JSON contribution before cloning this entry or visiting later forms.
+    // Entries are indented four spaces; the first replaces [] with [\n...\n  ], later ones add ,\n.
+    const json = JSON.stringify(entry, null, 2);
+    let lines = 1;
+    for (let index = 0; index < json.length; index++) if (json[index] === '\n') lines++;
+    bytes += new TextEncoder().encode(json).byteLength + 4 * lines + (entries.length === 0 ? 4 : 2);
+    if (bytes > CATALOG_LIMITS.maxBytes) throw new TypeError('catalog byte limit exceeded');
+    entries.push(structuredClone(entry));
+  }
+  return freeze({ ...catalog, forms: entries });
 }
 
 function freeze<T>(value: T): T {
