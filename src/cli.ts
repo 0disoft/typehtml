@@ -9,6 +9,7 @@ Usage:
   typehtml init <directory> [--package-manager bun|npm]
   typehtml doctor --config <file> [--format json|text|sarif] [--watch]
   typehtml capture --config <file> --out-dir <new-directory>
+  typehtml catalog --config <file> --out-dir <new-directory>
   typehtml lsp --config <file>
   typehtml generate --form <file> --out-dir <directory> [--root <directory>] [--check]
   typehtml generate --contract <file> --out-dir <directory> [--root <directory>] [--check]
@@ -33,6 +34,24 @@ async function main(): Promise<void> {
   }
   if (args.length === 1 && ['--version', '-v'].includes(args[0]!)) {
     process.stdout.write(`${VERSION}\n`);
+    return;
+  }
+  if (args[0] === 'catalog') {
+    const values = new Map<string, string>();
+    for (let index = 1; index < args.length; index++) {
+      const flag = args[index]!;
+      const value = args[++index];
+      if (!['--config', '--out-dir'].includes(flag) || values.has(flag) || value === undefined || value.startsWith('--')) usage();
+      values.set(flag, value);
+    }
+    if (!values.has('--config') || !values.has('--out-dir')) usage();
+    try {
+      const { writeFormCatalog } = await import('./catalog/files.ts');
+      process.stdout.write(`${JSON.stringify(await writeFormCatalog({ configPath: values.get('--config')!, directory: values.get('--out-dir')! }))}\n`);
+    } catch (error) {
+      process.stdout.write(`${JSON.stringify({ format: 'typehtml-catalog/1', status: 'error', message: error instanceof Error ? error.message : 'catalog failed' })}\n`);
+      process.exitCode = 2;
+    }
     return;
   }
   if (args[0] === 'capture') {
