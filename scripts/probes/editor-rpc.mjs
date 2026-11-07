@@ -14,7 +14,8 @@ await writeFile(formPath, JSON.stringify(form.definition));
 const loaded = await loadForm(formPath);
 await writeFile(join(directory, 'projection.json'), JSON.stringify(projectForm(form, { sourcePath: 'form.json', sourceSha256: loaded.sourceSha256 })));
 const htmlPath = join(directory, 'form.html');
-await writeFile(htmlPath, `<!--${'x'.repeat(1_500_000)}--><form id="example" method="post" action="/submit"><input name="unknown"><input type="hidden" name="_bc_csrf"><button>Save</button></form>`);
+const html = `<!--${'x'.repeat(1_500_000)}--><form id="example" method="post" action="/submit"><input name="unknown"><input type="hidden" name="_bc_csrf"><button>Save</button></form>`;
+await writeFile(htmlPath, html);
 const configPath = join(directory, 'doctor.json');
 await writeFile(configPath, JSON.stringify({ format: 'boundary-doctor/0.5-draft', root: directory,
   inputs: [{ kind: 'form-projection', path: 'projection.json' }], documents: [{ path: 'form.html',
@@ -55,4 +56,4 @@ assert.ok(messages.some((message) => message.method === 'textDocument/publishDia
   && message.params.uri === pathToFileURL(htmlPath).href && message.params.diagnostics.some((issue) => issue.code === 'BC010')));
 assert.ok(messages.some((message) => message.id === 1 && message.result.capabilities.textDocumentSync.change === 0));
 assert.deepEqual(messages.at(-1), { jsonrpc: '2.0', id: 2, result: null });
-console.log(JSON.stringify({ passed: true, savedHtmlBytes: 1_500_000, openFrameBytes: open.length }));
+console.log(JSON.stringify({ passed: true, savedHtmlBytes: Buffer.byteLength(html), openFrameBytes: open.length }));
