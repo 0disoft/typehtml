@@ -22,6 +22,7 @@ export class DoctorSessionManager<Plan> {
         let client: ManagedClient | undefined;
         try {
           client = await this.create(plan);
+          if (this.disposed) { await this.close(client); break; }
           this.clients.push(client);
           await this.start(client);
         } catch (error) {

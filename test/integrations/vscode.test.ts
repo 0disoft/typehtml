@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createLaunchPlan, validateLaunchFiles } from '../../integrations/vscode/src/config.ts';
 import { DoctorSessionManager, type ManagedClient } from '../../integrations/vscode/src/lifecycle.ts';
+import { DoctorProcess } from '../../integrations/vscode/src/process.ts';
 
 const root = resolve('workspace with spaces');
 
@@ -127,5 +128,47 @@ describe('VS Code language client lifetime', () => {
     expect((errors[0] as Error).message).toContain('startup deadline');
     await manager.dispose();
     expect(events).toEqual(['stop', 'dispose']);
+  });
+
+  test('disposal while the client factory awaits prevents a subsequent start', async () => {
+    const creating = gate();
+    const release = gate();
+    const events: string[] = [];
+    const manager = new DoctorSessionManager<string>(async () => {
+      creating.open(); await release.promise;
+      return { start: async () => { events.push('start'); }, stop: async () => { events.push('stop'); }, dispose: async () => { events.push('dispose'); } };
+    }, (error) => { throw error; });
+    const refreshed = manager.refresh(['one']);
+    await creating.promise;
+    const disposed = manager.dispose();
+    release.open();
+    await Promise.all([refreshed, disposed]);
+    expect(events).toEqual(['stop', 'dispose']);
+  });
+});
+
+describe('VS Code owned transport process', () => {
+  test('blocks a late transport callback after disposal', async () => {
+    const transport = new DoctorProcess({ root: process.cwd(), command: 'node', args: ['-e', 'process.exit(9)'] });
+    await transport.close();
+    await expect(transport.launch()).rejects.toThrow('closed');
+  });
+
+  test('awaits actual process exit and closes streams before allowing replacement', async () => {
+    const transport = new DoctorProcess({ root: process.cwd(), command: 'node', args: ['-e', 'setInterval(() => {}, 1000)'] });
+    try {
+      const child = await transport.launch();
+      expect(child.pid).toBeNumber();
+      await transport.close();
+      expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+      expect(child.stdin.destroyed && child.stdout.destroyed && child.stderr.destroyed).toBe(true);
+      await expect(transport.launch()).rejects.toThrow('closed');
+    } finally { await transport.close(); }
+  });
+
+  test('reports spawn errors and permits cleanup without leaking an error event', async () => {
+    const transport = new DoctorProcess({ root: process.cwd(), command: '__typehtml_missing_node_executable__', args: [] });
+    await expect(transport.launch()).rejects.toThrow();
+    await transport.close();
   });
 });

@@ -68,8 +68,9 @@ Focused launch/lifecycle tests run from the repository root:
 bun test test/integrations/vscode.test.ts
 ```
 
-The tests cover trust/opt-in gates, argument boundaries, path traversal, serialized
-replacement, startup failure cleanup, and disposal during startup. A real VS Code
+The tests cover trust/opt-in gates, argument boundaries, filesystem-link escape,
+serialized replacement, startup deadlines, disposal during factory/startup waits,
+and real Node child termination and stream cleanup. A real VS Code
 extension-host session must still be checked separately; unit tests and creating
 a VSIX alone do not prove the editor's complete UI integration.
 

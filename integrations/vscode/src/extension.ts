@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CloseAction, ErrorAction, LanguageClient } from 'vscode-languageclient/node';
 import { createLaunchPlan, validateLaunchFiles, type LaunchPlan } from './config';
 import { DoctorSessionManager } from './lifecycle';
+import { DoctorProcess } from './process';
 
 let sessions: DoctorSessionManager<LaunchPlan> | undefined;
 
@@ -12,9 +13,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   sessions = new DoctorSessionManager(async (plan) => {
     const checked = await validateLaunchFiles(plan);
     const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(plan.root));
-    const client = new LanguageClient('typehtml-doctor', 'TypeHTML Doctor (saved snapshots)', {
-      command: checked.command, args: [...checked.args], options: { cwd: checked.root, shell: false },
-    }, {
+    const transport = new DoctorProcess(checked);
+    const client = new LanguageClient('typehtml-doctor', 'TypeHTML Doctor (saved snapshots)', () => transport.launch(), {
       documentSelector: [{ scheme: 'file', language: 'html', pattern: { baseUri: vscode.Uri.file(plan.root).toString(), pattern: '**/*' } }],
       workspaceFolder: folder, outputChannel: output,
       initializationFailedHandler: () => false,
@@ -24,7 +24,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         didOpen: async (document, next) => { if (!document.isDirty) await next(document); },
       },
     });
-    return { start: () => client.start(), stop: () => client.stop(), dispose: () => client.dispose() };
+    return {
+      start: () => client.start(),
+      stop: async () => { try { await client.stop(); } finally { await transport.close(); } },
+      dispose: async () => { try { await client.dispose(); } finally { await transport.close(); } },
+    };
   }, report);
   const refresh = async () => {
     const plans: LaunchPlan[] = [];
