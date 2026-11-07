@@ -4,7 +4,7 @@ Typed contracts for native HTML forms and server boundaries.
 
 `@0disoft/typehtml` connects typed input schemas, native URL-encoded forms, and server handlers. Use a flat JSON contract or a Standard Schema validator with explicit transport fields. It provides strict request parsing, typed decoded input, public output validation, and a Doctor CLI that finds form/contract mismatches. It uses ordinary HTML and standard `Request`/`Response` routes.
 
-The current package is **`0.1.0-alpha.4`**. Its public API can change before `1.0`. The npm name `typehtml` belongs to another project; this package uses the `@0disoft/typehtml` scope. Install the locally built tarball; registry publication is a separate decision.
+The current package is **`0.1.0-alpha.5`**. Its public API can change before `1.0`. The npm name `typehtml` belongs to another project; this package uses the `@0disoft/typehtml` scope. Install the locally built tarball; registry publication is a separate decision.
 
 ## Start a project
 
@@ -18,7 +18,7 @@ node dist/cli.js init ../my-typehtml-app
 
 cd ../my-typehtml-app
 # Replace this with the absolute path to the generated tarball.
-bun add /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.4.tgz
+bun add /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.5.tgz
 bun run generate
 bun run doctor
 bun run dev

@@ -1,6 +1,6 @@
 # Public API
 
-The `0.1.0-alpha.4` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
+The `0.1.0-alpha.5` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
 
 See [Developer tools](DEVELOPER_TOOLS.md) for `createFormHelpers`, `createFormMessages`, `resolveFormLocale`, native Request testing, static catalogs, and the optional VS Code saved-snapshot connection. These features are opt-in and preserve existing error formats.
 

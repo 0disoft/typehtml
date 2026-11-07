@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.5 — Developer tools regression fixes
+
+- Restrict typed helper names to keys shared by every form in an unnarrowed union.
+- Preserve absent raw-request Content-Type consistently on Node and Bun instead of synthesizing text/plain.
+- Correct custom error-ID links for repeated text fields exposed through the typed helper.
+- Enforce catalog HTML budgets during rendering and describe repeated-field presence accurately.
+- Reject immutable design output paths even when their directories are filesystem links.
+- Refresh the separate VS Code extension without sending document bodies that can exceed LSP frame limits.
+- Rebuild local npm and VSIX installation artifacts; no registry or Marketplace publication.
+
 ## 0.1.0-alpha.4 — Local developer tools
 
 - Add opt-in field-name type checking from explicit wire declarations, preserving existing dynamic helpers.

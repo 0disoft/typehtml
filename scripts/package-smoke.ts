@@ -340,6 +340,10 @@ const outputTransform: StandardSchemaV1<{count:string},{count:number}>={'~standa
 const transformed=defineSchemaForm({id:'typed.transform',path:'/transform',fields:{name:{type:'string'}},input:schema,output:outputTransform});
 createSchemaFormHandler(transformed,{allowedOrigins:['https://consumer.invalid'],authenticate:()=>({}),csrfToken:()=>'token',authorize:()=>true,execute:()=>({count:'2'}),project:(value)=>value,success:({count})=>({location:'/done?count='+count.toFixed(0)})});
 const form = defineForm({ id: 'typed.submit', path: '/typed', input: { type: 'object', additionalProperties: false, required: ['name', 'quantity'], properties: { name: { type: 'string' }, quantity: { type: 'integer' }, choice: { type: 'string', enum: ['yes', 'no'] } } }, output: { type: 'object', additionalProperties: false, required: ['message'], properties: { message: { type: 'string' } } } });
+declare const selected: typeof form | typeof rich;
+createFormHelpers(selected).name('name');
+// @ts-expect-error a field absent from one possible form cannot be promised safe
+createFormHelpers(selected).field('quantity');
 const valid: InferInput<typeof form> = { name: 'Ada', quantity: 2, choice: 'yes' };
 const fieldName:'quantity'=createFormHelpers(form).field('quantity').name;void fieldName;
 // @ts-expect-error legacy declaration keys must not widen into arbitrary strings

@@ -1,6 +1,6 @@
 # Developer tools
 
-These additive `0.1.0-alpha.4` tools preserve the existing native form handler,
+These additive `0.1.0-alpha.5` tools preserve the existing native form handler,
 validation order, 422 HTML errors, and 303 success redirects. They run on Node.js
 22+ and Bun 1.4+; the optional editor extension has its own installation.
 
@@ -10,6 +10,8 @@ Use `createFormHelpers` with an inline `defineForm` or `defineSchemaForm` result
 It retains literal wire names rather than inferring names from transformed
 business data. Annotations that widen a form to `DefinedForm` or
 `DefinedSchemaForm` also widen its known field names; keep the inferred type.
+For an unnarrowed union of forms, only names common to every member are safe.
+Narrow to the selected form before creating helpers to use its branch-only keys.
 
 ```ts
 import { createFormHelpers, defineForm, renderAttributes } from '@0disoft/typehtml';
@@ -82,6 +84,10 @@ const malformed = await client.submit({
 });
 ```
 
+When no Content-Type is supplied with `rawBody`, it stays absent on both Node
+and Bun. The helper encodes it as UTF-8 bytes to prevent Fetch from silently
+adding `text/plain` to a string body.
+
 The result is the original Response. Inspect its status, headers, and HTML body;
 errors are not converted into a new JSON wire format. Reading a response body
 consumes it as usual. External database or mail hooks remain your test fixture's
@@ -131,7 +137,7 @@ callbacks. User callbacks and per-code overrides continue to work.
 
 ## Connect saved HTML snapshots to VS Code
 
-The optional `typehtml-vscode-0.1.0.vsix` is separate from the npm archive. Install
+The optional `typehtml-vscode-0.1.1.vsix` is separate from the npm archive. Install
 the TypeHTML tarball in the application, use VS Code's **Extensions: Install from
 VSIX...**, then configure a trusted local workspace:
 
@@ -198,3 +204,9 @@ config, to 8 MiB (`maxSourceBytes`) and each file to 2 MiB, enforcing the remain
 budget before parsing another manifest. Rich forms expose explicit transport constraints only; opaque Standard
 Schema refinements/transforms and output types are not inferred. This catalog is
 not an OpenAPI exporter, a server generator, or proof of application completeness.
+
+HTML size is checked during escaping, so output that grows past the limit stops
+before later fields are rendered. Presence labels distinguish declared required
+keys, arrays that need values because of `minItems`, and absent optional arrays
+or checkboxes that decode to `[]` or `false`. The JSON `required` flag records the
+declaration; it is not a complete summary of every value constraint.
