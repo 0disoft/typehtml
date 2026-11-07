@@ -85,28 +85,78 @@ export function serializeFormCatalog(catalog: FormCatalog): string {
   return json;
 }
 
-function escape(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+class CatalogHtml {
+  private readonly parts: string[] = [];
+  private readonly encoder = new TextEncoder();
+  private bytes = 0;
+
+  append(value: string): void {
+    this.bytes += this.encoder.encode(value).byteLength;
+    if (this.bytes > CATALOG_LIMITS.maxBytes) throw new TypeError('catalog HTML byte limit exceeded');
+    this.parts.push(value);
+  }
+
+  text(value: string): void {
+    // Bound escaped temporary strings as well as the retained output. Keep UTF-16 pairs together
+    // so counting each chunk has exactly the same UTF-8 size as counting the joined document.
+    for (let start = 0; start < value.length;) {
+      let end = Math.min(start + 1_024, value.length);
+      const last = value.charCodeAt(end - 1);
+      const next = value.charCodeAt(end);
+      if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--;
+      this.append(value.slice(start, end).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'));
+      start = end;
+    }
+  }
+
+  finish(): string { return this.parts.join(''); }
+}
+
+function presence(field: CatalogField): string {
+  if (field.required) return 'Required key';
+  if (field.schema.type === 'array' && (field.schema.minItems ?? 0) > 0) return 'Required by minItems';
+  if (field.schema.type === 'array') return 'Optional key (missing decodes to [])';
+  if (field.schema.type === 'boolean') return 'Optional key (missing decodes to false)';
+  return 'Optional key';
 }
 
 /** Read-only HTML, with no scripts, active forms, remote assets, or hidden sections. */
 export function renderFormCatalog(catalog: FormCatalog): string {
   serializeFormCatalog(catalog);
-  const sections = catalog.forms.map((form) => {
-    const rows = form.fields.map((field) => `<tr><th scope="row"><code>${escape(field.name)}</code></th><td>${field.required ? 'Required key' : 'Optional key'}</td><td><pre>${escape(JSON.stringify(field.schema, null, 2))}</pre></td></tr>`).join('\n');
-    return `<section><h2>${escape(form.id)}</h2><p><code>${form.method} ${escape(form.path)}</code></p>
-<p>Encoding: <code>${form.encoding}</code>. Validation: <code>${form.validation}</code>.</p>
-<p>Protocol fields: ${form.protocolFields.map((name) => `<code>${escape(name)}</code>`).join(', ')}. No token values are included.</p>
-<table><caption>Declared wire fields</caption><thead><tr><th scope="col">Name</th><th scope="col">Presence</th><th scope="col">Codec and constraints</th></tr></thead><tbody>${rows}</tbody></table>
-<h3>Transport limits</h3><pre>${escape(JSON.stringify(form.limits, null, 2))}</pre></section>`;
-  }).join('\n');
-  const html = `<!doctype html>
+  const html = new CatalogHtml();
+  html.append(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-<title>${escape(catalog.title)}</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:1100px;margin:2rem auto;padding:0 1rem;color:#182434;background:#fff}section{margin:2rem 0;padding-top:1rem;border-top:2px solid #ccd6df}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccd6df;padding:.7rem;text-align:left;vertical-align:top}caption{text-align:left;font-weight:600;margin:.5rem 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}code{overflow-wrap:anywhere}h1,h2,h3{line-height:1.25}</style></head>
-<body><h1>${escape(catalog.title)}</h1><p>${catalog.forms.length} explicitly registered forms. This catalog documents declarations; it does not execute application code or prove application completeness.</p>
+<title>`);
+  html.text(catalog.title);
+  html.append(`</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:1100px;margin:2rem auto;padding:0 1rem;color:#182434;background:#fff}section{margin:2rem 0;padding-top:1rem;border-top:2px solid #ccd6df}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccd6df;padding:.7rem;text-align:left;vertical-align:top}caption{text-align:left;font-weight:600;margin:.5rem 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}code{overflow-wrap:anywhere}h1,h2,h3{line-height:1.25}</style></head>
+<body><h1>`);
+  html.text(catalog.title);
+  html.append(`</h1><p>${catalog.forms.length} explicitly registered forms. This catalog documents declarations; it does not execute application code or prove application completeness.</p>
 <p>The native boundary normally returns HTML 422 for invalid input and a 303 redirect after success. Authentication, authorization, CSRF tokens, persistence, and redirected GET pages belong to the host application. Required keys, empty values, and browser selection constraints have distinct semantics; consult each codec. Standard Schema refinements, transforms, and output types are not inferred here.</p>
-${sections}</body></html>\n`;
-  if (new TextEncoder().encode(html).byteLength > CATALOG_LIMITS.maxBytes) throw new TypeError('catalog HTML byte limit exceeded');
-  return html;
+`);
+  for (const [index, form] of catalog.forms.entries()) {
+    if (index > 0) html.append('\n');
+    html.append('<section><h2>'); html.text(form.id); html.append('</h2><p><code>');
+    html.text(form.method); html.append(' '); html.text(form.path);
+    html.append('</code></p>\n<p>Encoding: <code>'); html.text(form.encoding);
+    html.append('</code>. Validation: <code>'); html.text(form.validation);
+    html.append('</code>.</p>\n<p>Protocol fields: ');
+    for (const [protocolIndex, name] of form.protocolFields.entries()) {
+      if (protocolIndex > 0) html.append(', ');
+      html.append('<code>'); html.text(name); html.append('</code>');
+    }
+    html.append('. No token values are included.</p>\n<table><caption>Declared wire fields</caption><thead><tr><th scope="col">Name</th><th scope="col">Presence</th><th scope="col">Codec and constraints</th></tr></thead><tbody>');
+    for (const [fieldIndex, field] of form.fields.entries()) {
+      if (fieldIndex > 0) html.append('\n');
+      html.append('<tr><th scope="row"><code>'); html.text(field.name);
+      html.append('</code></th><td>'); html.text(presence(field));
+      html.append('</td><td><pre>'); html.text(JSON.stringify(field.schema, null, 2));
+      html.append('</pre></td></tr>');
+    }
+    html.append('</tbody></table>\n<h3>Transport limits</h3><pre>');
+    html.text(JSON.stringify(form.limits, null, 2)); html.append('</pre></section>');
+  }
+  html.append('</body></html>\n');
+  return html.finish();
 }

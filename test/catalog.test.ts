@@ -6,6 +6,7 @@ import { createFormCatalog, renderFormCatalog, serializeFormCatalog, CATALOG_LIM
 import { writeFormCatalog } from '../src/catalog/files.ts';
 import { defineForm, type DefinedForm } from '../src/form/definition.ts';
 import { defineSchemaForm } from '../src/form/schema-form.ts';
+import { decodeFormFields } from '../src/form/fields.ts';
 import { DEFAULT_MAX_BYTES } from '../src/contract/strict-json.ts';
 
 const schema = { type: 'object', additionalProperties: false, required: ['name'], properties: {
@@ -93,6 +94,51 @@ describe('read-only form catalog', () => {
     expect(() => createFormCatalog([...accepted, overflow])).toThrow('catalog field limit exceeded');
     expect(schemaRead).toBe(false);
   });
+
+  it('describes implicit array presence and absent boolean/array decoding accurately', () => {
+    const validator = { '~standard': { version: 1 as const, vendor: 'test', validate: (value: unknown) => ({ value }) } };
+    const rich = defineSchemaForm({ id: 'presence', path: '/presence', fields: {
+      tags: { type: 'array', items: { type: 'string' }, minItems: 1 },
+      optionalTags: { type: 'array', items: { type: 'string' } }, notify: { type: 'boolean' },
+    }, input: validator, output: validator });
+    const decoded = decodeFormFields(rich.fields, []);
+    expect(decoded.validation.ok).toBe(false);
+    if (!decoded.validation.ok) expect(decoded.validation.issues).toEqual([{ field: 'tags', code: 'MIN_ITEMS', message: 'tags has too few values' }]);
+    const catalog = createFormCatalog([rich]);
+    expect(catalog.forms[0]!.fields[0]!.required).toBe(false); // The declaration flag is retained.
+    const html = renderFormCatalog(catalog);
+    expect(html).toContain('<code>tags</code></th><td>Required by minItems</td>');
+    expect(html).toContain('<code>optionalTags</code></th><td>Optional key (missing decodes to [])</td>');
+    expect(html).toContain('<code>notify</code></th><td>Optional key (missing decodes to false)</td>');
+  });
+
+  it('counts HTML bytes exactly across chunked Unicode and rejects one byte over', () => {
+    const validator = { '~standard': { version: 1 as const, vendor: 'test', validate: (value: unknown) => ({ value }) } };
+    const sized = (value: string) => createFormCatalog([defineSchemaForm({ id: 'html.limit', path: '/html-limit', fields: {
+      note: { type: 'string', const: value },
+    }, input: validator, output: validator })]);
+    const jsonPrefix = '{\n  "type": "string",\n  "const": "';
+    const prefix = 'x'.repeat(1_023 - jsonPrefix.length) + '😀&\n';
+    const initial = renderFormCatalog(sized(prefix));
+    expect(initial).toContain('😀&amp;\\n');
+    const padding = CATALOG_LIMITS.maxBytes - new TextEncoder().encode(initial).byteLength;
+    const exact = renderFormCatalog(sized(prefix + 'x'.repeat(padding)));
+    expect(new TextEncoder().encode(exact).byteLength).toBe(CATALOG_LIMITS.maxBytes);
+    expect(exact).not.toContain('\uFFFD');
+    expect(() => renderFormCatalog(sized(prefix + 'x'.repeat(padding + 1)))).toThrow('catalog HTML byte limit exceeded');
+  });
+
+  it('stops HTML rendering before visiting later fields after escaping exceeds its budget', () => {
+    const expanded = (index: number) => defineForm({ ...definition, id: `expanded${index}`, path: `/expanded${index}`,
+      input: { ...schema, properties: { name: { type: 'string', const: '&'.repeat(1_000_000) } } } });
+    const catalog = createFormCatalog([expanded(0), expanded(1), form]);
+    let laterFields = 0;
+    const forms = catalog.forms.map((entry, index) => index !== 2 ? entry : new Proxy(entry, {
+      get: (target, key, receiver) => { if (key === 'fields') laterFields++; return Reflect.get(target, key, receiver); },
+    }));
+    expect(() => renderFormCatalog({ ...catalog, forms })).toThrow('catalog HTML byte limit exceeded');
+    expect(laterFields).toBe(1); // JSON validation reads it once; HTML rendering must not reach it.
+  });
 });
 
 describe('static catalog files and CLI', () => {
@@ -115,6 +161,26 @@ describe('static catalog files and CLI', () => {
     await expect(writeFormCatalog({ configPath, directory: root })).rejects.toThrow('outside output');
     await mkdir(join(root, 'docs', 'design'), { recursive: true });
     await expect(writeFormCatalog({ configPath, directory: join(root, 'docs', 'design', 'catalog') })).rejects.toThrow('immutable');
+  }));
+
+  it('rejects immutable design paths even when that directory itself is a filesystem link', async () => fixture(async (root, configPath) => {
+    const snapshot = join(root, 'immutable-snapshot');
+    await mkdir(snapshot);
+    await mkdir(join(root, 'docs'));
+    await symlink(snapshot, join(root, 'docs', 'design'), process.platform === 'win32' ? 'junction' : 'dir');
+    await expect(writeFormCatalog({ configPath, directory: join(root, 'docs', 'design', 'catalog') })).rejects.toThrow('immutable');
+    await expect(readFile(join(snapshot, 'catalog', 'catalog.json'))).rejects.toThrow();
+  }));
+
+  it('allows one concurrent creator and leaves a complete winning catalog', async () => fixture(async (root, configPath) => {
+    const directory = join(root, 'concurrent output');
+    const results = await Promise.allSettled([
+      writeFormCatalog({ configPath, directory }), writeFormCatalog({ configPath, directory }),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(JSON.parse(await readFile(join(directory, 'catalog.json'), 'utf8')).forms[0].id).toBe(form.id);
+    expect(await readFile(join(directory, 'index.html'), 'utf8')).toBe(renderFormCatalog(createFormCatalog([form])));
   }));
 
   it('rejects duplicate JSON members, executable modules, unknown config keys and symlink escapes', async () => fixture(async (root, configPath) => {

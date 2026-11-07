@@ -9,6 +9,10 @@ function contained(root: string, path: string): boolean {
   return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 function missing(error: unknown): boolean { return error instanceof Error && 'code' in error && error.code === 'ENOENT'; }
+function designPath(path: string): boolean {
+  const segments = path.replaceAll('\\', '/').toLowerCase().split('/');
+  return segments.some((segment, index) => segment === 'docs' && segments[index + 1] === 'design');
+}
 
 async function readSource(path: string, remaining: number): Promise<Uint8Array> {
   try { return await readBoundedJsonBytes(path, Math.min(DEFAULT_MAX_BYTES, remaining)); }
@@ -62,8 +66,7 @@ export async function writeFormCatalog(options: Readonly<{ configPath: string; d
   const requested = resolve(options.directory);
   const parent = await realpath(dirname(requested));
   const output = resolve(parent, basename(requested));
-  const segments = output.replaceAll('\\', '/').toLowerCase().split('/');
-  if (segments.some((segment, index) => segment === 'docs' && segments[index + 1] === 'design')) throw new TypeError('design snapshots are immutable');
+  if (designPath(requested) || designPath(output)) throw new TypeError('design snapshots are immutable');
   if (sourcePaths.some((path) => contained(output, path))) throw new TypeError('catalog sources must be outside output');
   // A fresh directory never replaces user files or an existing design snapshot, including symlinks.
   await mkdir(output);
