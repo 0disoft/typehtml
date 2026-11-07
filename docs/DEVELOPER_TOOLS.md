@@ -193,7 +193,8 @@ const json = serializeFormCatalog(catalog);
 The returned snapshot is deeply frozen and preserves each definition's field
 order. Duplicate IDs/routes are rejected. `CATALOG_LIMITS` bounds a catalog to
 256 forms, 8,192 fields, a 200-code-unit title, and 8 MiB each of serialized JSON
-and rendered HTML. Each CLI manifest also uses the existing bounded strict JSON
-reader. Rich forms expose explicit transport constraints only; opaque Standard
+and rendered HTML. The CLI also bounds aggregate source bytes, including the
+config, to 8 MiB (`maxSourceBytes`) and each file to 2 MiB, enforcing the remaining
+budget before parsing another manifest. Rich forms expose explicit transport constraints only; opaque Standard
 Schema refinements/transforms and output types are not inferred. This catalog is
 not an OpenAPI exporter, a server generator, or proof of application completeness.
