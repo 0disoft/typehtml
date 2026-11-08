@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defineWireForm, schemaFormWireManifest, projectWireForm, loadWireForm, loadRichFormCheck, validateRichFormCheck, verifyWireFormSource } from '../../src/form/wire-manifest.ts';
+import { defineWireForm, schemaFormWireManifest, projectWireForm, loadWireForm, loadRichFormCheck, validateRichFormCheck, verifyWireFormSource, getRichFormTransport } from '../../src/form/wire-manifest.ts';
 import { defineSchemaForm } from '../../src/form/schema-form.ts';
 
 const make = () => defineWireForm({ id: 'rich.profile', path: '/profile', fields: {
@@ -55,6 +55,21 @@ describe('rich JSON wire manifests', () => {
     expect(form.definition.fields.name).toEqual({ type: 'string', maxLength: 20 });
     expect(Object.isFrozen(fields)).toBe(false);
     expect(Object.isFrozen(form.definition.fields.name)).toBe(true);
+  });
+
+  test('validates caller-owned projections on every lookup instead of caching stale or tampered declarations', () => {
+    const owned = project();
+    expect(getRichFormTransport(owned)).toBe(getRichFormTransport(owned));
+    const caller = structuredClone(owned);
+    const first = getRichFormTransport(caller);
+    expect(first.byName['person.name']?.codec).toMatchObject({ maxLength: 40 });
+    expect(Object.isFrozen(caller.transport.fixedDeclarations)).toBe(false);
+    Object.assign(caller.transport.fixedDeclarations['person.name']!, { maxLength: 400 });
+    expect(() => getRichFormTransport(caller)).toThrow('inconsistent');
+    expect(first.byName['person.name']?.codec).toMatchObject({ maxLength: 40 });
+    const invalid = structuredClone(owned);
+    Object.assign(invalid.transport.fields[0]!, { maxOccurrences: 99 });
+    expect(() => getRichFormTransport(invalid)).toThrow('inconsistent');
   });
 
   test('serializes bounded collections using canonical source declarations and exact normalized row metadata', () => {

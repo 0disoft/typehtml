@@ -193,10 +193,9 @@ function collectionDefinitions(collections: PreparedFormCollections): FormCollec
 export function getRichFormTransport(check: RichFormCheck): PreparedFormTransport {
   const cached = preparedChecks.get(check);
   if (cached !== undefined) return cached;
-  const prepared = prepareFormTransport(check.transport.fixedDeclarations, collectionDefinitions(check.transport.collections), { allowEmpty: Object.keys(check.uploads).length > 0 });
-  assertUploadDomains(prepared, check.uploads);
-  preparedChecks.set(check, prepared);
-  return prepared;
+  // Only projectWireForm registers owned immutable checks. Validate external JSON each time:
+  // caching a caller-owned object would silently keep stale declarations after a mutation.
+  return getRichFormTransport(validateRichFormCheck(check));
 }
 
 export function verifyWireFormSource(check: RichFormCheck, loaded: Readonly<{ form: DefinedWireForm; sourceSha256: string }>): void {

@@ -56,9 +56,11 @@ export function redactCapturedHtml(html: string, fields: readonly string[] = [])
     handled.add(element);
     const location = element.sourceCodeLocation;
     if (location?.startTag === undefined) throw new TypeError('sensitive capture control has no source location');
-    if (element.attrs.some((attr) => attr.name === 'value')) {
-      // Regenerate this start tag so duplicate raw value attributes cannot retain a secret.
-      const attributes = element.attrs.map((attr) => ` ${attr.prefix ? `${attr.prefix}:` : ''}${attr.name}="${escapeHtml(attr.name === 'value' ? marker : attr.value)}"`).join('');
+    const sensitiveAttribute = (name: string) => name === 'value' || element.tagName === 'option' && name === 'label';
+    if (element.attrs.some((attr) => sensitiveAttribute(attr.name))) {
+      // Native option labels can contain the same private data as values/text. Regeneration
+      // also removes duplicate raw value/label attributes which the parser already discarded.
+      const attributes = element.attrs.map((attr) => ` ${attr.prefix ? `${attr.prefix}:` : ''}${attr.name}="${escapeHtml(sensitiveAttribute(attr.name) ? marker : attr.value)}"`).join('');
       patches.push({ start: location.startTag.startOffset, end: location.startTag.endOffset, text: `<${element.tagName}${attributes}>` });
     }
     if (contents) patches.push({ start: location.startTag.endOffset, end: location.endTag?.startOffset ?? location.endOffset, text: marker });

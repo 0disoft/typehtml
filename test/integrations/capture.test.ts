@@ -95,6 +95,14 @@ describe('control value redaction', () => {
     expect(() => redactCapturedHtml('<input name="_bc_csrf" value="unclosed-secret"')).toThrow('incomplete tag');
   });
 
+  test('redacts native option label attributes, including implicit values and duplicate raw labels', () => {
+    const source = '<select name="private"><option value="value-secret" label="label-secret" label="duplicate-secret" selected>text-secret</option><option label="implicit-label-secret">implicit-value-secret</option></select><input name="private" list="private-choices"><datalist id="private-choices"><option label="suggestion-label-secret" value="suggestion-value-secret"></datalist>';
+    const result = redactCapturedHtml(source, ['private']);
+    for (const secret of ['value-secret', 'label-secret', 'duplicate-secret', 'text-secret', 'implicit-label-secret', 'implicit-value-secret', 'suggestion-label-secret', 'suggestion-value-secret']) expect(result.html).not.toContain(secret);
+    expect(result.html).toContain('label="[REDACTED]"');
+    expect(result.html).toContain('selected=""');
+  });
+
   test('retains byte limits after marker expansion and rejects non-HTML callback responses', async () => {
     const small = '<input name=_bc_csrf value=x>';
     await expect(collectAstroHtml({ ...common, maxBytes: Buffer.byteLength(small), render: () => small })).rejects.toThrow('redacted capture exceeds byte limits');
