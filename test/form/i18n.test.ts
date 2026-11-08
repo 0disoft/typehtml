@@ -110,6 +110,22 @@ describe('opt-in built-in form messages', () => {
     expect(createFormState({}, issues, { locale: 'ko' }).issues).toEqual(issues);
   });
 
+  it('localizes upload counts and row identity without reading vendor text or freezing host options', () => {
+    const uploads = { attachment: { multiple: true, minFiles: 2, maxFiles: 3, accept: ['.pdf'] } };
+    const labels = { attachment: '첨부파일', 'items[0].rowId': '상품' };
+    const messages = createFormMessages('ko', { uploads, labels });
+    uploads.attachment.minFiles = 99;
+    uploads.attachment.accept.push('.txt');
+    const state = createFormState({}, [issue('attachment', 'MIN_FILES'), issue('attachment', 'MAX_FILES'),
+      issue('items[0].rowId', 'DUPLICATE_ROW_KEY')], { messages });
+    expect(state.fieldErrors.attachment).toEqual(['첨부파일 파일을 2개 이상 선택해 주세요.', '첨부파일 파일은 3개 이하로 선택해 주세요.']);
+    expect(state.fieldErrors['items[0].rowId']).toEqual(['상품 행 식별자가 중복되었습니다.']);
+    expect(Object.isFrozen(uploads.attachment)).toBe(false);
+    expect(createFormState({}, [issue('attachment', 'MIN_FILES')], {
+      messages: createFormMessages('en', { uploads: { attachment: { multiple: true, minFiles: 2 } } }),
+    }).fieldErrors.attachment![0]).toContain('2');
+  });
+
   it('snapshots labels/constraints, handles prototype-like names, and leaves escaping to the renderer', () => {
     const fields = { name: { type: 'string' as const, minLength: 0, maxLength: 2 } };
     const labels = { name: '<이름>' };

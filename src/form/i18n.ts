@@ -1,6 +1,7 @@
 import type { InputIssue } from '../runtime/input.ts';
 import type { FormField, FormFields, ScalarFormField } from './fields.ts';
 import type { FormMessages } from './state.ts';
+import { prepareUploadFields, UPLOAD_LIMITS, type UploadFields } from './uploads.ts';
 
 export type FormMessageLocale = 'en' | 'ko';
 
@@ -8,11 +9,13 @@ export interface FormMessageOptions {
   /** Explicit wire-field definitions: form.fields or form.input.schema.properties. */
   readonly fields?: FormFields;
   readonly labels?: Readonly<Record<string, string>>;
+  readonly uploads?: UploadFields;
 }
 
 type FieldMessageData = Readonly<{
   label: string; minLength?: number; maxLength?: number; minimum?: number; maximum?: number;
   minItems?: number; maxItems?: number; literal?: string;
+  minFiles?: number; maxFiles?: number;
 }>;
 
 function fieldMessageData(field: FormField | undefined, label: string): FieldMessageData {
@@ -27,7 +30,7 @@ function fieldMessageData(field: FormField | undefined, label: string): FieldMes
 }
 
 function formatIssue(locale: FormMessageLocale, issue: InputIssue, data: FieldMessageData): string {
-  const { label, minLength, maxLength, minimum, maximum, minItems, maxItems, literal } = data;
+  const { label, minLength, maxLength, minimum, maximum, minItems, maxItems, literal, minFiles, maxFiles } = data;
   if (locale === 'ko') {
     switch (issue.code) {
       case 'REQUIRED': return `${label} 항목을 입력해 주세요.`;
@@ -45,6 +48,9 @@ function formatIssue(locale: FormMessageLocale, issue: InputIssue, data: FieldMe
       case 'MIN_ITEMS': return minItems === undefined ? `${label} 항목의 값이 부족합니다.` : `${label} 항목은 ${minItems}개 이상 선택해 주세요.`;
       case 'MAX_ITEMS': return maxItems === undefined ? `${label} 항목의 값이 너무 많습니다.` : `${label} 항목은 ${maxItems}개 이하로 선택해 주세요.`;
       case 'SPARSE_ARRAY': return '순서가 있는 입력값은 0번부터 빠짐없이 제출해 주세요.';
+      case 'MIN_FILES': return minFiles === undefined ? `${label} 파일이 부족합니다.` : `${label} 파일을 ${minFiles}개 이상 선택해 주세요.`;
+      case 'MAX_FILES': return maxFiles === undefined ? `${label} 파일이 너무 많습니다.` : `${label} 파일은 ${maxFiles}개 이하로 선택해 주세요.`;
+      case 'DUPLICATE_ROW_KEY': return `${label} 행 식별자가 중복되었습니다.`;
       default: return issue.message;
     }
   }
@@ -64,6 +70,9 @@ function formatIssue(locale: FormMessageLocale, issue: InputIssue, data: FieldMe
     case 'MIN_ITEMS': return minItems === undefined ? `${label} has too few values` : `${label} must contain at least ${minItems} values`;
     case 'MAX_ITEMS': return maxItems === undefined ? `${label} has too many values` : `${label} must contain at most ${maxItems} values`;
     case 'SPARSE_ARRAY': return 'Indexed form values must be contiguous from zero';
+    case 'MIN_FILES': return minFiles === undefined ? `${label} has too few files` : `${label} must contain at least ${minFiles} files`;
+    case 'MAX_FILES': return maxFiles === undefined ? `${label} has too many files` : `${label} must contain at most ${maxFiles} files`;
+    case 'DUPLICATE_ROW_KEY': return `${label} row identities must be unique`;
     default: return issue.message;
   }
 }
@@ -71,7 +80,7 @@ function formatIssue(locale: FormMessageLocale, issue: InputIssue, data: FieldMe
 const MESSAGE_CODES = Object.freeze([
   'REQUIRED', 'MIN_LENGTH', 'MAX_LENGTH', 'MINIMUM', 'MAXIMUM', 'CONST', 'ENUM', 'PATTERN',
   'PATTERN_UNSUPPORTED', 'INVALID_INTEGER_SYNTAX', 'INTEGER_RANGE', 'BOOLEAN', 'DUPLICATE_KEY',
-  'MIN_ITEMS', 'MAX_ITEMS', 'SPARSE_ARRAY',
+  'MIN_ITEMS', 'MAX_ITEMS', 'SPARSE_ARRAY', 'MIN_FILES', 'MAX_FILES', 'DUPLICATE_ROW_KEY',
 ]);
 
 /**
@@ -89,6 +98,10 @@ export function createFormMessages(locale: string, options: FormMessageOptions =
   }
   const fields = new Map<string, FieldMessageData>();
   for (const [name, field] of Object.entries(options.fields ?? {})) fields.set(name, fieldMessageData(field, labels.get(name) ?? name));
+  for (const [name, field] of Object.entries(prepareUploadFields(options.uploads))) fields.set(name, Object.freeze({
+    label: labels.get(name) ?? name, minFiles: Math.max(field.required ? 1 : 0, field.minFiles ?? 0),
+    maxFiles: field.maxFiles ?? (field.multiple ? UPLOAD_LIMITS.defaultMultipleCount : 1),
+  }));
   const format = (issue: InputIssue): string => formatIssue(language, issue,
     fields.get(issue.field ?? '') ?? fieldMessageData(undefined, labels.get(issue.field ?? '') ?? issue.field ?? 'Form'));
   return Object.freeze(Object.fromEntries(MESSAGE_CODES.map((code) => [code, format])));

@@ -62,6 +62,14 @@
       "types": "./dist/integrations/node.d.ts",
       "import": "./dist/integrations/node.js"
     },
+    "./adapters/react": {
+      "types": "./dist/integrations/react.d.ts",
+      "import": "./dist/integrations/react.js"
+    },
+    "./adapters/svelte": {
+      "types": "./dist/integrations/svelte.d.ts",
+      "import": "./dist/integrations/svelte.js"
+    },
     "./sqlite/idempotency": {
       "types": "./dist/adapter/sqlite/idempotency-store.d.ts",
       "bun": "./dist/adapter/sqlite/idempotency-store.js",
@@ -77,7 +85,8 @@
     "docs/API.md",
     "docs/FORM_INTEGRATIONS.md",
     "docs/DEVELOPER_TOOLS.md",
-    "docs/UPLOADS.md"
+    "docs/UPLOADS.md",
+    "docs/FORM_UX.md"
   ],
   "publishConfig": {
     "access": "public",

@@ -1,13 +1,13 @@
 import type { InputIssue } from '../runtime/input.ts';
-import { getFieldProps, getOptionProps, renderAttributes, type FieldPropsOptions, type HtmlAttributes } from './attributes.ts';
+import { getFieldProps, type FieldPropsOptions, type HtmlAttributes } from './attributes.ts';
 import type { RawFormValues } from './boundary.ts';
-import type { FormField } from './fields.ts';
 import { escapeHtml } from './html.ts';
 import type { DefinedSchemaForm } from './schema-form.ts';
 import { getUploadFieldProps } from './upload-html.ts';
-import { createFormState, formFieldId, renderErrorSummary, renderFieldErrors, type FormStateOptions } from './state.ts';
-import { getActiveTransportRows, getPreparedFormTransport, resolveTransportField, type PreparedFormTransport } from './transport.ts';
+import { createFormState, formFieldId, type FormStateOptions } from './state.ts';
+import { getPreparedFormTransport, resolveTransportField, type PreparedFormTransport } from './transport.ts';
 import { collectionFieldId, collectionFieldName, COLLECTION_LIMITS } from './collections.ts';
+import { renderNativeForm } from './native-render.ts';
 
 const rowKeysByRaw = new WeakMap<RawFormValues, WeakMap<PreparedFormTransport, Readonly<Record<string, string>>>>();
 function stableRowKeys(transport: PreparedFormTransport, raw: RawFormValues): Readonly<Record<string, string>> {
@@ -78,52 +78,6 @@ export function getSchemaFieldProps(form: DefinedSchemaForm, name: string, optio
   return Object.freeze({ ...props, ...(field.type === 'array' && control === 'select' ? { multiple: true } : {}) });
 }
 
-function renderControl(form: DefinedSchemaForm, name: string, field: FormField, state: ReturnType<typeof createFormState>): string {
-  const item = field.type === 'array' ? field.items : field;
-  const id = getSchemaFieldId(form, name, state);
-  if (field.type === 'array') {
-    const raw = state.rawValues[name];
-    const values = typeof raw === 'string' ? [raw] : raw ?? [];
-    const visible = values.length === 0 && (field.required || (field.minItems ?? 0) > 0) ? [''] : values;
-    return visible.map((value, index) => {
-      const props = getSchemaFieldProps(form, name, { state, control: 'text', id: index === 0 ? id : `${id}-${index}` });
-      // Native text inputs sanitize newlines; textarea preserves multiline raw values.
-      if (/[\r\n]/.test(value)) {
-        const { type: _, ...attributes } = props;
-        return `<textarea${renderAttributes(attributes)}>\n${escapeHtml(value)}</textarea>`;
-      }
-      return `<input${renderAttributes({ ...props, value })}>`;
-    }).join('');
-  }
-  const raw = state.rawValues[name];
-  if (item.type === 'boolean' && (item.falseValue !== undefined || typeof raw === 'string' && raw !== (item.trueValue ?? 'on'))) {
-    const selected = typeof raw === 'string' ? raw : item.falseValue!;
-    const { type: _, checked: __, value: ___, required: ____, ...props } = getSchemaFieldProps(form, name, { state });
-    const values = [...new Set([item.trueValue ?? 'on', ...(item.falseValue === undefined ? [] : [item.falseValue]), selected])];
-    return `<select${renderAttributes(props)}>${values.map((value) => `<option${renderAttributes(getOptionProps(value, selected))}>${escapeHtml(value)}</option>`).join('')}</select>`;
-  }
-  if (field.control === 'radio') {
-    const values = 'enum' in item && item.enum !== undefined ? item.enum.map(String)
-      : [String('const' in item && item.const !== undefined ? item.const : raw ?? 'on')];
-    if (typeof raw === 'string' && !values.includes(raw)) values.push(raw);
-    return values.map((value, index) => `<label><input${renderAttributes(getSchemaFieldProps(form, name, { state, control: 'radio', optionValue: value, id: index === 0 ? id : `${id}-${index}` }))}>${escapeHtml(value)}</label>`).join('');
-  }
-  const props = getSchemaFieldProps(form, name, { state });
-  if (props.type === 'checkbox' && !(typeof raw === 'string' && raw !== props.value)) return `<input${renderAttributes(props)}>`;
-  if (field.control === 'textarea' || typeof raw === 'string' && /[\r\n]/.test(raw)) {
-    const { value: _, type: __, ...attributes } = props;
-    // HTML strips one leading LF immediately after a textarea start tag.
-    return `<textarea${renderAttributes(attributes)}>\n${escapeHtml(typeof raw === 'string' ? raw : '')}</textarea>`;
-  }
-  if (field.control === 'select' || props.type === 'checkbox') {
-    const { value: _, type: __, checked: ___, ...attributes } = props;
-    const values = 'enum' in item && item.enum !== undefined ? item.enum.map(String) : typeof raw === 'string' ? [raw] : [...raw ?? []];
-    if (typeof raw === 'string' && !values.includes(raw)) values.push(raw);
-    return `<select${renderAttributes(attributes)}><option value=""></option>${values.map((value) => `<option${renderAttributes(getOptionProps(value, raw))}>${escapeHtml(value)}</option>`).join('')}</select>`;
-  }
-  return `<input${renderAttributes(props)}>`;
-}
-
 export function renderSchemaFormErrors(
   form: DefinedSchemaForm, raw: RawFormValues, issues: readonly InputIssue[], csrfToken: string,
   options: FormStateOptions & Readonly<{ title?: string; summaryTitle?: string; submitLabel?: string }> = {},
@@ -131,14 +85,8 @@ export function renderSchemaFormErrors(
 ): string {
   const state = createFormState(raw, issues, options);
   const title = options.title ?? 'Check your form';
-  const transport = getPreparedFormTransport(form.fields, form.collections);
-  const active = getActiveTransportRows(transport, Object.keys(raw));
-  const indexes = Object.fromEntries(Object.entries(active).map(([name, values]) => [name, new Set(values)]));
-  const controls = transport.fields
-    .filter(({ row }) => row === undefined || indexes[row.collection]!.has(row.index))
-    .filter(({ name, declaration }) => declaration.required || declaration.type === 'boolean' || declaration.type === 'array' || Object.hasOwn(raw, name) || (state.fieldErrors[name]?.length ?? 0) > 0)
-    .map(({ name, declaration }) => `<p><label for="${getSchemaFieldId(form, name, state)}">${escapeHtml(name)}</label>${renderControl(form, name, declaration, state)}${renderFieldErrors(state, name, `${getSchemaFieldId(form, name, state)}-error`)}</p>`).join('\n');
-  const uploadControls = Object.keys(form.uploads).map((name) => `<p><label for="${formFieldId(name)}">${escapeHtml(name)}</label><input${renderAttributes(getUploadFieldProps(form, name, { state }))}>${renderFieldErrors(state, name)}</p>`).join('\n');
-  const encoding = form.multipart === undefined ? '' : ' enctype="multipart/form-data"';
-  return `<!doctype html><html lang="${escapeHtml(state.locale)}"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><main><h1>${escapeHtml(title)}</h1>${renderErrorSummary(state, { title: options.summaryTitle, fieldId: (name) => getSchemaFieldId(form, name, state) })}<form id="${escapeHtml(form.id)}" method="post" action="${escapeHtml(form.path)}"${encoding}><input type="hidden" name="_bc_csrf" value="${escapeHtml(csrfToken)}">${requestKey === undefined ? '' : `<input type="hidden" name="_bc_request" value="${escapeHtml(requestKey)}">`}${controls}${uploadControls}<button type="submit">${escapeHtml(options.submitLabel ?? 'Submit')}</button></form></main></body></html>`;
+  const markup = renderNativeForm(form, csrfToken, { state, mode: 'invalid', requestKey,
+    summaryTitle: options.summaryTitle, submitLabel: options.submitLabel,
+  });
+  return `<!doctype html><html lang="${escapeHtml(state.locale)}"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><main><h1>${escapeHtml(title)}</h1>${markup}</main></body></html>`;
 }
