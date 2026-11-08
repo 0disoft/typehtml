@@ -1,6 +1,6 @@
 {
   "name": "@0disoft/typehtml",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "type": "module",
   "description": "Typed native HTML forms, server validation, and form contract diagnostics",
   "license": "MIT",
@@ -70,6 +70,10 @@
       "types": "./dist/integrations/svelte.d.ts",
       "import": "./dist/integrations/svelte.js"
     },
+    "./adapters/capture": {
+      "types": "./dist/integrations/capture.d.ts",
+      "import": "./dist/integrations/capture.js"
+    },
     "./sqlite/idempotency": {
       "types": "./dist/adapter/sqlite/idempotency-store.d.ts",
       "bun": "./dist/adapter/sqlite/idempotency-store.js",
@@ -86,7 +90,8 @@
     "docs/FORM_INTEGRATIONS.md",
     "docs/DEVELOPER_TOOLS.md",
     "docs/UPLOADS.md",
-    "docs/FORM_UX.md"
+    "docs/FORM_UX.md",
+    "docs/FRAMEWORK_CAPTURE.md"
   ],
   "publishConfig": {
     "access": "public",

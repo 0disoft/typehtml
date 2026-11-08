@@ -79,6 +79,12 @@ async function consumer(directory: string, manager: 'npm' | 'bun'): Promise<void
     expect(JSON.parse(await run(`${manager}/${runtime} extended native forms`, [executable!, 'extended.mjs'], directory)).passed === true, `${manager}/${runtime}: extended form mismatch`);
     checks.push(`${manager}/${runtime}: schema forms, nested/repeated/boolean input, CSRF, replay, adapters and Node sockets`);
   }
+  await writeFile(join(directory, 'rich-form.mjs'), await readFile(join(root, 'scripts/probes/rich-form.mjs'), 'utf8'));
+  for (const [runtime, executable] of [['node', node], ['bun', bun]] as const) {
+    expect(JSON.parse(await run(`${manager}/${runtime} installed rich forms`, [executable!, 'rich-form.mjs'], directory)).passed === true, `${manager}/${runtime}: rich form mismatch`);
+    checks.push(`${manager}/${runtime}: installed collections, streaming uploads/cleanup/limits, shared native UI, rich projection and adapter exports`);
+  }
+  for (const document of ['UPLOADS.md', 'FORM_UX.md', 'FRAMEWORK_CAPTURE.md']) await access(join(installed, 'docs', document));
   await writeFile(join(directory, 'reference.mjs'), REFERENCE_PROBE);
   expect(JSON.parse(await run(`${manager} Node reference rejection`, [node!, 'reference.mjs'], directory)).unsupported === true, `${manager}: Node reference did not reject`);
   expect(JSON.parse(await run(`${manager} Bun reference example`, [bun, 'reference.mjs'], directory)).intents === 0, `${manager}: Bun reference could not create a memory store`);

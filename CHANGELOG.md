@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.6 — Portable installation and richer native forms
+
+- Add a relocatable starter kit containing a standalone initializer and local package; choose Node/Bun runtime independently from npm/Bun installation.
+- Share immutable transport declarations across decoding, HTML helpers and verified rich Doctor projections.
+- Add bounded dynamic object rows with explicit stable identity and immutable host array helpers.
+- Add opt-in streaming multipart uploads with byte/count/time bounds, private temporary storage and request-owned cleanup.
+- Extend Doctor to rich native form structure and carry schema locations, reasons and fixes through JSON, text, SARIF and LSP; retain unknown opaque validation and redacted values.
+- Share initial/422 native rendering, labels, choices, accessible errors and validation-only previews; add optional React/Svelte connections using host state without automatic submission retries.
+- Capture explicitly selected Hono/Astro/SvelteKit response states with bounded reads and control-value redaction.
+- Refresh local npm tarball, starter kit and VS Code extension 0.1.2; no registry or Marketplace publication.
+
 ## 0.1.0-alpha.5 — Developer tools regression fixes
 
 - Restrict typed helper names to keys shared by every form in an unnarrowed union.

@@ -1,6 +1,6 @@
 # Forms, framework integrations, and Doctor tooling
 
-This guide describes the additive `0.1.0-alpha.5` APIs. The existing `defineForm`, `createFormHandler`, JSON manifests, native 422 HTML responses, and successful 303 redirects remain supported. TypeHTML supplies a request boundary and diagnostics; your application supplies authentication, authorization, persistence, GET pages, and framework startup.
+This guide describes the additive `0.1.0-alpha.6` APIs. The existing `defineForm`, `createFormHandler`, JSON manifests, native 422 HTML responses, and successful 303 redirects remain supported. TypeHTML supplies a request boundary and diagnostics; your application supplies authentication, authorization, persistence, GET pages, and framework startup.
 
 The core, adapters, and Doctor run on Node.js 22+ and Bun 1.4+. The optional SQLite idempotency adapter requires Bun 1.4+. No validator library, application server, browser runtime, or reactive form model is bundled by the new form APIs.
 
@@ -9,9 +9,9 @@ The core, adapters, and Doctor run on Node.js 22+ and Bun 1.4+. The optional SQL
 Install the supplied archive in a consumer project. These commands install files; they do not publish to npm:
 
 ```sh
-npm install "./0disoft-typehtml-0.1.0-alpha.5.tgz" "zod@^4"
+npm install "./0disoft-typehtml-0.1.0-alpha.6.tgz" "zod@^4"
 # Or:
-bun add "./0disoft-typehtml-0.1.0-alpha.5.tgz" "zod@^4"
+bun add "./0disoft-typehtml-0.1.0-alpha.6.tgz" "zod@^4"
 ```
 
 Use an absolute archive path when the file is elsewhere. Zod is the example's application dependency. Valibot 1 and ArkType 2 Standard Schema implementations are also tested; install the validator you use rather than all three. TypeHTML does not load your validator library automatically.
@@ -104,7 +104,7 @@ Only declared array names permit repeated entries. Scalar, CSRF, and request-key
 
 Paths are limited to 16 segments, indexes `0` through `1023`, and 1024 declared fields. Overlapping declarations such as `a` and `a.b`, mixed containers such as `a[0]` and `a.b`, noncanonical indexes such as `[01]`, and prototype-related segments are rejected. Request keys never invent new paths or indexes. Sparse indexed results produce a `SPARSE_ARRAY` issue. Transport byte, key-length, entry-count, and timeout limits continue to apply; increase an explicit limit when a legitimate form needs more entries or longer nested names.
 
-Boolean profile controls are checkbox-based. To model a radio/select with textual choices, use a string or integer `enum`. String/integer `control` hints support text, textarea, select, radio, and checkbox; scalar radio/checkbox props require an explicit submitted option value. Files and multipart bodies are outside these APIs.
+Boolean profile controls are checkbox-based. To model a radio/select with textual choices, use a string or integer `enum`. String/integer `control` hints support text, textarea, select, radio, and checkbox; scalar radio/checkbox props require an explicit submitted option value. Opt-in files use separate `uploads` declarations and explicit `multipart` limits; see [uploads](UPLOADS.md).
 
 ### Bounded object rows and stable UI identity
 
@@ -415,7 +415,7 @@ await writeFile('feedback.profile.json', JSON.stringify(schemaFormManifest(feedb
 
 **Runtime submissions must still use `createSchemaFormHandler(feedback, ...)`.** Do not build a production handler from `profile.form`: that would omit the vendor's refinements and transforms. A Doctor result does not prove the example's blocked-word refinement or any output/business behavior.
 
-Arrays, booleans, nested paths, and patterns outside the scalar profile are explicitly rejected by `SchemaProfileUnsupportedError`; its codes identify nested names, unsupported types, or unsupported patterns. They are not silently dropped from an allowlist, and their Doctor analysis is not claimed complete. Rich runtime support is broader than the statically analyzable profile. `doctor` can analyze supplied rendered HTML from any framework, but does not parse JSX/TSX/Astro source code or execute its templates.
+Arrays, booleans, nested paths, collections, uploads and patterns outside the legacy scalar profile are explicitly rejected by `SchemaProfileUnsupportedError`; they are not silently dropped. For richer structure, use `schemaFormWireManifest` and the verified `typehtml-form-check/1` projection described in [developer tools](DEVELOPER_TOOLS.md). Opaque validators remain unknown. Doctor consumes supplied rendered HTML; it does not parse JSX/TSX/Astro source code or execute templates.
 
 ## Capture selected rendered HTML
 
@@ -506,6 +506,6 @@ Exit codes remain 0 for the selected checks passing, 1 for confirmed blocking de
 
 Watch mode analyzes serially, polls only selected dependencies, detects projection repairs, and stops on SIGINT/SIGTERM. It does not recursively watch a workspace or run capture again. Each rerun emits another complete report; concatenated JSON/SARIF watch output is a stream of reports, not one uploadable JSON document. Use a single non-watch run for a CI artifact. Programmatic `watchDoctor(configPath, { signal, onReport, intervalMs?, maxRuns? })` requires a host-owned cancellation signal; `runDoctor`, `formatDoctorReport`, and `doctorToSarif` also work directly.
 
-The stdio language server publishes diagnostics for persisted selected HTML/configuration files on initialization and document open/save events. Configure an LSP client's command as `typehtml`, arguments `lsp --config <absolute-doctor-config>`. It supports initialize, shutdown/exit, and saved-file diagnostics; it does not analyze unsaved buffer overlays, JSX/Astro source, templates, or inferred routes. `runDoctorLanguageServer(configPath, input, output)` is available for a host integration. No VS Code extension is bundled.
+The stdio language server publishes diagnostics for persisted selected HTML/configuration files on initialization and document open/save events. Configure an LSP client's command as `typehtml`, arguments `lsp --config <absolute-doctor-config>`. It supports initialize, shutdown/exit, and saved-file diagnostics; it does not analyze unsaved buffer overlays, JSX/Astro source, templates, or inferred routes. `runDoctorLanguageServer(configPath, input, output)` is available for a host integration. A separate local VSIX is described in [developer tools](DEVELOPER_TOOLS.md) and included in the starter kit.
 
 Doctor recognizes textarea, single/multiple select, radio groups, and checkboxes structurally. Required fields supplied only by optional native choices remain conditional/unknown; it does not fabricate missing-field certainty. Multiple possible submissions of a scalar remain defects, including multiple-select controls against a scalar contract. File/image controls, directionality fields, custom elements, runtime security, and unsupported constraint comparisons remain explicitly unknown/unsupported or not evaluated where appropriate.

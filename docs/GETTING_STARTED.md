@@ -25,7 +25,7 @@ npm run doctor
 npm run dev
 ```
 
-No source checkout or manual dependency edit is needed. The initializer copies the tarball to `vendor/typehtml.tgz` and records `file:./vendor/typehtml.tgz`. Third-party dependencies may still require network access. Maintainers build the kit with `bun run build`, `bun run pack`, then `bun run starter:pack`.
+No source checkout or manual dependency edit is needed. The initializer copies the tarball to `vendor/typehtml.tgz` and records `file:./vendor/typehtml.tgz`. Third-party dependencies may still require network access. Maintainers run `bun run pack`, package the VSIX under `integrations/vscode`, then run `bun run starter:pack`.
 
 The repository builds an installable npm tarball. Registry publication is a separate step; do not install the unrelated unscoped `typehtml` package.
 
@@ -33,7 +33,7 @@ The repository builds an installable npm tarball. Registry publication is a sepa
 # Run from the TypeHTML repository.
 bun install
 bun run pack
-node dist/cli.js init ../my-typehtml-app --package-manager bun --package-source artifacts/0disoft-typehtml-0.1.0-alpha.5.tgz
+node dist/cli.js init ../my-typehtml-app --package-manager bun --package-source artifacts/0disoft-typehtml-0.1.0-alpha.6.tgz
 ```
 
 The package artifact is copied into the generated project automatically:
@@ -50,7 +50,7 @@ For npm installation:
 
 ```sh
 # Run the initializer from the built TypeHTML checkout.
-node dist/cli.js init ../my-typehtml-app --package-manager npm --package-source artifacts/0disoft-typehtml-0.1.0-alpha.5.tgz
+node dist/cli.js init ../my-typehtml-app --package-manager npm --package-source artifacts/0disoft-typehtml-0.1.0-alpha.6.tgz
 cd ../my-typehtml-app
 npm install
 npm run generate
@@ -60,7 +60,7 @@ npm run dev
 
 Use a new or empty target directory. `init` refuses to overwrite an existing project's files and never runs package installation or a server for you. Paths containing spaces should be quoted using your shell's syntax.
 
-After this version is published, its registry install command will be `npm install @0disoft/typehtml@0.1.0-alpha.5` or `bun add @0disoft/typehtml@0.1.0-alpha.5`. The packed tarball is the prepublication installation path.
+This release is distributed as local installation archives. No npm or Marketplace publication is performed.
 
 ## Starter files
 

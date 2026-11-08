@@ -4,7 +4,7 @@ Opt-in streaming file forms use `uploads`, `multipart`, and an optional request-
 
 `prepareFormTransport(fields)` creates the immutable `typehtml-transport/1` wire contract shared by schema handlers and HTML helpers. It records canonical names/paths, scalar or repeated cardinality, presence/count limits, and missing-value behavior (`absent`, `false`, or `empty-array`). `resolveTransportField(transport, name)` performs an exact indexed lookup; it never infers a path from a submitted key. Caller-owned declarations remain mutable and are never cached; only owned frozen snapshots are reused. Existing required-field and minimum-count error precedence is preserved.
 
-The `0.1.0-alpha.5` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
+The `0.1.0-alpha.6` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
 
 See [Developer tools](DEVELOPER_TOOLS.md) for `createFormHelpers`, `createFormMessages`, `resolveFormLocale`, native Request testing, static catalogs, and the optional VS Code saved-snapshot connection. These features are opt-in and preserve existing error formats.
 
@@ -18,6 +18,9 @@ See [Developer tools](DEVELOPER_TOOLS.md) for `createFormHelpers`, `createFormMe
 | `@0disoft/typehtml/catalog` | Frozen catalog snapshots and escaped read-only HTML/JSON exports | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/adapters/web` | Hono, Astro, React Router and SvelteKit endpoint adapters | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/adapters/node` | Raw Node/Express and Fastify route adapters | Node.js 22+ / Bun 1.4+ |
+| `@0disoft/typehtml/adapters/react` | Injected host React hooks and native-to-React props | Host React; no bundled React dependency |
+| `@0disoft/typehtml/adapters/svelte` | Injected host writable store connection | Host Svelte; no bundled Svelte dependency |
+| `@0disoft/typehtml/adapters/capture` | Explicit Hono/Astro/SvelteKit rendered-state collection | Node.js 22+ / Bun 1.4+ |
 | `@0disoft/typehtml/sqlite/idempotency` | Durable generic idempotency and same-database atomic writes | Bun 1.4+ |
 | `@0disoft/typehtml/reference/order` | Explicit Bun SQLite/Hono order reference | Bun 1.4+ |
 
@@ -188,7 +191,7 @@ Generation preserves an authoritative source hash and produces a typed `form-def
 
 For programmatic use, `projectForm(form, { sourcePath, sourceSha256, generator? })` produces a form-only projection, and `verifyFormSource(check, loaded)` checks its source bytes, behavior digest, and selected structure. Source paths are project-root-relative. Doctor verifies the source before reporting connection findings and stops affected checks when it is stale.
 
-Doctor analyzes selected native paths, not an entire application's protection. It handles supported fixed inputs, textarea, select, checkbox/radio choices and submitters, records source/activation/target evidence, and keeps unknown/unsupported coverage separate. Optional choices can leave supply conditional; multiple possible values still conflict with scalar contracts. File/image controls, arbitrary JavaScript mutation, and richer runtime data schemas remain outside the verified scalar profile. Static success does not validate CSRF, authentication, current object policy, or database behavior.
+Doctor analyzes selected native paths, not an entire application's protection. The original scalar projection remains supported unchanged. The rich wire projection additionally checks nested/boolean/repeated fields, bounded rows, file-control structure and request-count limits. Both record source/activation/target evidence and keep unknown/unsupported coverage separate. File content, opaque schema execution, arbitrary JavaScript mutation, CSRF, authentication and database behavior remain unproven. See [developer tools](DEVELOPER_TOOLS.md), [native form UX](FORM_UX.md) and [framework capture](FRAMEWORK_CAPTURE.md).
 
 Doctor bounds each run to 1,000 native paths, 100,000 control visits across those paths, and 4 MiB of compact UTF-8 JSON in the `submissions` array. This byte limit covers submission evidence, not the entire report or pretty-printing. Evidence is measured incrementally before it is retained. When a limit stops analysis, the report includes `analysisTruncated: true` and an `analysis-budget-exceeded` finding; remaining boundaries are not evaluated. This produces exit code 3 even when incomplete coverage was allowed by the audit policy. Existing confirmed defects and execution errors retain exit codes 1 and 2 respectively.
 

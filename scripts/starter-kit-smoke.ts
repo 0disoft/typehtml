@@ -27,7 +27,19 @@ try {
   const pkg = JSON.parse(await readFile(join(app, 'package.json'), 'utf8'));
   if (pkg.dependencies['@0disoft/typehtml'] !== 'file:./vendor/typehtml.tgz') throw new Error('starter dependency is not relative');
   const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-  if (digest(await readFile(join(app, 'vendor/typehtml.tgz'))) !== digest(await readFile(join(kit, 'typehtml.tgz')))) throw new Error('archive copy differs');
+  const kitDigest = digest(await readFile(join(kit, 'typehtml.tgz')));
+  if (digest(await readFile(join(app, 'vendor/typehtml.tgz'))) !== kitDigest) throw new Error('archive copy differs');
+  if (kitDigest !== digest(await readFile(join(root, 'artifacts', `${manifest.name.replace(/^@/, '').replaceAll('/', '-')}-${manifest.version}.tgz`)))) throw new Error('starter kit contains a stale core archive');
+  const extension = JSON.parse(await readFile(join(root, 'integrations/vscode/package.json'), 'utf8'));
+  const vsixName = `typehtml-vscode-${extension.version}.vsix`;
+  let editorVerified = false;
+  let sourceVsix: Uint8Array | undefined;
+  try { sourceVsix = await readFile(join(root, 'artifacts', vsixName)); }
+  catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error; }
+  if (sourceVsix !== undefined) {
+    if (digest(await readFile(join(kit, vsixName))) !== digest(sourceVsix)) throw new Error('starter kit contains a stale VSIX');
+    editorVerified = true;
+  }
   const moved = join(fixture, 'moved app');
   await rename(app, moved);
   const npm = Bun.which(process.platform === 'win32' ? 'npm.cmd' : 'npm');
@@ -36,5 +48,5 @@ try {
   await run([...installer, 'install', '--ignore-scripts', '--no-audit', '--no-fund'], moved);
   const version = (await run([node, join(moved, 'node_modules/@0disoft/typehtml/dist/cli.js'), '--version'], moved)).trim();
   if (version !== manifest.version) throw new Error('installed kit version differs');
-  console.log(JSON.stringify({ status: 'passed', version, checks: ['standalone Node initializer', 'space-containing path', 'byte-identical local archive', 'movable relative dependency', 'one npm install', 'installed CLI'] }));
+  console.log(JSON.stringify({ status: 'passed', version, editorVerified, checks: ['standalone Node initializer', 'space-containing path', 'byte-identical current local archive', 'current VSIX when available', 'movable relative dependency', 'one npm install', 'installed CLI'] }));
 } finally { await rm(fixture, { recursive: true, force: true }); }
