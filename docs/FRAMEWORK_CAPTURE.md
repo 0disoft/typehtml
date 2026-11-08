@@ -62,7 +62,7 @@ This is control-value redaction, not a general secret scanner. Unnamed text, scr
 bun scripts/framework-smoke.ts
 
 # Final archive check; imports the installed public capture subpath:
-bun scripts/framework-smoke.ts --package ./artifacts/0disoft-typehtml-0.1.0-alpha.7.tgz
+bun scripts/framework-smoke.ts --package ./artifacts/0disoft-typehtml-0.1.0-alpha.8.tgz
 ```
 
 The managed smoke script creates a temporary npm project with Hono 4, Astro 7, SvelteKit 3, Svelte 5, Vite 8, and compatible peer dependencies. Dependencies follow stable releases within these explicit major ranges; they are not added to TypeHTML's runtime dependencies. It renders initial, invalid (422), and two-row states through a real Hono `app.request`, Astro's programmatic development server, and SvelteKit's Vite SSR server. The SvelteKit fixture uses its [official Vite plugin](https://svelte.dev/docs/kit/%40sveltejs-kit-vite), with configuration in `vite.config.js` for SvelteKit 3.

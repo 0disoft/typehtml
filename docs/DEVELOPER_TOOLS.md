@@ -1,6 +1,6 @@
 # Developer tools
 
-These additive `0.1.0-alpha.7` tools preserve the existing native form handler,
+These additive `0.1.0-alpha.8` tools preserve the existing native form handler,
 validation order, 422 HTML errors, and 303 success redirects. They run on Node.js
 22+ and Bun 1.4+; the optional editor extension has its own installation.
 
@@ -137,7 +137,7 @@ callbacks. User callbacks and per-code overrides continue to work.
 
 ## Connect saved HTML snapshots to VS Code
 
-The optional `typehtml-vscode-0.1.3.vsix` is separate from the npm archive. Install
+The optional `typehtml-vscode-0.1.4.vsix` is separate from the npm archive. Install
 the TypeHTML tarball in the application, use VS Code's **Extensions: Install from
 VSIX...**, then configure a trusted local workspace:
 
