@@ -33,7 +33,7 @@ The repository builds an installable npm tarball. Registry publication is a sepa
 # Run from the TypeHTML repository.
 bun install
 bun run pack
-node dist/cli.js init ../my-typehtml-app --package-manager bun --package-source artifacts/0disoft-typehtml-0.1.0-alpha.6.tgz
+node dist/cli.js init ../my-typehtml-app --package-manager bun --package-source artifacts/0disoft-typehtml-0.1.0-alpha.7.tgz
 ```
 
 The package artifact is copied into the generated project automatically:
@@ -50,7 +50,7 @@ For npm installation:
 
 ```sh
 # Run the initializer from the built TypeHTML checkout.
-node dist/cli.js init ../my-typehtml-app --package-manager npm --package-source artifacts/0disoft-typehtml-0.1.0-alpha.6.tgz
+node dist/cli.js init ../my-typehtml-app --package-manager npm --package-source artifacts/0disoft-typehtml-0.1.0-alpha.7.tgz
 cd ../my-typehtml-app
 npm install
 npm run generate

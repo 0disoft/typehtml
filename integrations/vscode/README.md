@@ -12,7 +12,7 @@ application correctness.
 1. Install the TypeHTML `.tgz` in your application using `npm install <archive>`
    or `bun add <archive>`.
 2. In VS Code, choose **Extensions: Install from VSIX...** and select
-   `typehtml-vscode-0.1.2.vsix` from this repository's `artifacts/` directory.
+   `typehtml-vscode-0.1.3.vsix` from this repository's `artifacts/` directory.
 3. Open a trusted local workspace folder and configure its Doctor JSON path:
 
 ```json

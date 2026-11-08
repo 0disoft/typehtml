@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import React, { act } from 'react';
 import { JSDOM } from 'jsdom';
 import { writable } from 'svelte/store';
-import { SubmissionPendingError } from '@0disoft/typehtml';
+import { SubmissionPendingError, defineSchemaForm, createFormState, renderNativeField, createSubmissionTask } from '@0disoft/typehtml';
 import { createReactSubmissionHook, toReactFieldProps } from '@0disoft/typehtml/adapters/react';
 import { connectSvelteSubmission } from '@0disoft/typehtml/adapters/svelte';
 
@@ -36,6 +36,21 @@ const reactErrors = [];
 console.error = (...args) => { reactErrors.push(args.map(String).join(' ')); };
 let root;
 try {
+  const identity = { '~standard': { version: 1, vendor: 'native-dom-probe', validate: (value) => ({ value }) } };
+  const nativeForm = defineSchemaForm({ id: 'native.regression', path: '/save', fields: { color: { type: 'string' }, enabled: { type: 'boolean' } }, input: identity, output: identity });
+  for (const control of ['select', 'radio']) {
+    const host = document.createElement('form');
+    host.innerHTML = renderNativeField(nativeForm, 'color', createFormState({ color: 'blue' }, []), {
+      control, choices: [{ value: 'red' }, { value: 'blue', disabled: true }],
+    });
+    assert.deepEqual([...new dom.window.FormData(host)], [['color', 'blue']]);
+  }
+  assert.throws(() => renderNativeField(nativeForm, 'enabled', undefined, { control: 'textarea' }), /boolean/);
+  const schedulingFailure = new Error('host scheduler failed after expiry');
+  const faulty = createSubmissionTask({ schedule: (expire) => { expire(); throw schedulingFailure; } });
+  await assert.rejects(faulty.run(() => { throw new Error('must not execute'); }), (error) => error === schedulingFailure);
+  await new Promise((resolve) => setTimeout(resolve, 0)); // An orphaned abort rejection fails this Node child.
+  checks.push('native DOM disabled-choice raw-value preservation and boolean control guard', 'synchronous scheduler abort/error has no unhandled rejection');
   const { createRoot } = await import('react-dom/client');
   const useSubmission = createReactSubmissionHook(React);
   const parent = new AbortController();

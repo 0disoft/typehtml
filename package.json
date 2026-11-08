@@ -1,6 +1,6 @@
 {
   "name": "@0disoft/typehtml",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "type": "module",
   "description": "Typed native HTML forms, server validation, and form contract diagnostics",
   "license": "MIT",

@@ -6,7 +6,7 @@ import {
   defineSchemaForm, createSchemaFormHandler, createTemporaryUploadStore,
   createFormState, renderNativeForm, validateSchemaFormInput,
   createCollectionRows, appendCollectionRow, moveCollectionRow,
-  schemaFormWireManifest, defineWireForm, projectWireForm,
+  schemaFormWireManifest, defineWireForm, projectWireForm, getRichFormTransport,
 } from '@0disoft/typehtml';
 import * as capture from '@0disoft/typehtml/adapters/capture';
 import * as react from '@0disoft/typehtml/adapters/react';
@@ -58,6 +58,36 @@ try {
   assert.equal((await handler(request('2', '1234', true))).status, 422);
   assert.equal(executed, 1);
   assert.deepEqual(await readdir(directory), []);
+  let mixedExecuted = 0;
+  for (const index of [1, 2]) {
+    const mixed = defineSchemaForm({ id: `rich.mixed${index}`, path: '/mixed',
+      fields: { [`rows[${index}].caption`]: { type: 'string', required: true } },
+      uploads: { 'rows[0].file': { required: true } }, multipart: {}, input: identity, output: identity,
+    });
+    let mixedFile;
+    const handleMixed = createSchemaFormHandler(mixed, {
+      uploadStore: createTemporaryUploadStore({ directory }), allowedOrigins: ['https://app.test'],
+      authenticate: () => ({}), csrfToken: () => 'token', authorize: () => true,
+      execute: async ({ input }) => {
+        mixedExecuted++;
+        assert.equal(input.rows.length, 2);
+        assert.equal(input.rows[1].caption, 'second');
+        mixedFile = input.rows[0].file;
+        assert.equal(await new Response(mixedFile.stream()).text(), '1234');
+        return { saved: true };
+      }, project: (value) => value, success: () => ({ location: '/done' }),
+    });
+    const data = new FormData();
+    data.append('_bc_csrf', 'token'); data.append(`rows[${index}].caption`, 'second');
+    data.append('rows[0].file', new File(['1234'], 'indexed.txt', { type: 'text/plain' }));
+    const response = await handleMixed(new Request('https://app.test/mixed', {
+      method: 'POST', headers: { origin: 'https://app.test', accept: 'text/html' }, body: data,
+    }));
+    assert.equal(response.status, index === 1 ? 303 : 422);
+    assert.deepEqual(await readdir(directory), []);
+    if (mixedFile !== undefined) assert.throws(() => mixedFile.stream(), /lifetime/);
+  }
+  assert.equal(mixedExecuted, 1);
   const preview = await validateSchemaFormInput(form, [{ key: 'profile.name', value: 'Ada' }]);
   assert.equal(preview.ok, false); // Required files are supplied only by a real request.
   const state = createFormState({ 'profile.name': 'A', tags: ['b', 'a', 'b'] }, [{ field: 'profile.name', code: 'MIN_LENGTH', message: 'Too short' }]);
@@ -71,8 +101,15 @@ try {
   const projection = projectWireForm(defineWireForm(wire), { sourcePath: 'form.json', sourceSha256: '0'.repeat(64) });
   assert.equal(projection.action.encoding, 'multipart');
   assert.equal(projection.runtimeValidationCoverage, 'not-statically-analyzed');
+  const mutableProjection = structuredClone(projection);
+  assert.equal(getRichFormTransport(mutableProjection).byName.tags.maxOccurrences, 3);
+  mutableProjection.transport.fixedDeclarations.tags.maxItems = 99;
+  assert.throws(() => getRichFormTransport(mutableProjection), /inconsistent/);
+  const privateHtml = '<select name="private"><option value="private-value" label="private-label" label="duplicate-secret" selected>private-text</option></select>';
+  const redacted = capture.redactCapturedHtml(privateHtml, ['private']).html;
+  for (const secret of ['private-value', 'private-label', 'duplicate-secret', 'private-text']) assert.ok(!redacted.includes(secret));
   assert.equal(typeof capture.collectHonoHtml, 'function');
   assert.equal(typeof react.createReactSubmissionHook, 'function');
   assert.equal(typeof svelte.connectSvelteSubmission, 'function');
-  console.log(JSON.stringify({ passed: true, executed, boundedUploads: true, disposed: true }));
+  console.log(JSON.stringify({ passed: true, executed, boundedUploads: true, mixedIndexedUploads: true, disposed: true }));
 } finally { await rm(directory, { recursive: true, force: true }); }

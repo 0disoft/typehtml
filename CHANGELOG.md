@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.7 — Eight-stage regression fixes
+
+- Check fixed indexed array holes after declared text and file slots are assembled; retain rejection of actual gaps and existing URL-encoded defaults.
+- Preserve raw scalar values when a selected native choice becomes disabled, including explicit boolean false tokens.
+- Reject scalar boolean rendering overrides that can silently change false into a submitted true token; keep existing field-props APIs unchanged.
+- Avoid an unhandled abort rejection when an injected submission scheduler expires synchronously and then throws.
+- Fully revalidate caller-owned rich projections on lookup; cache only owned immutable projections.
+- Redact sensitive select/datalist option label attributes and duplicate raw labels as well as values/text.
+- Extend installed Node/Bun and native DOM probes and refresh local core, starter-kit and VSIX 0.1.3 artifacts without publication.
+
 ## 0.1.0-alpha.6 — Portable installation and richer native forms
 
 - Add a relocatable starter kit containing a standalone initializer and local package; choose Node/Bun runtime independently from npm/Bun installation.
