@@ -4,6 +4,7 @@ import type { RawFormValues } from './boundary.ts';
 import type { FormField } from './fields.ts';
 import { escapeHtml } from './html.ts';
 import type { DefinedSchemaForm } from './schema-form.ts';
+import { getUploadFieldProps } from './upload-html.ts';
 import { createFormState, formFieldId, renderErrorSummary, renderFieldErrors, type FormStateOptions } from './state.ts';
 import { getActiveTransportRows, getPreparedFormTransport, resolveTransportField, type PreparedFormTransport } from './transport.ts';
 import { collectionFieldId, collectionFieldName, COLLECTION_LIMITS } from './collections.ts';
@@ -48,6 +49,7 @@ export function getSchemaFieldId(form: DefinedSchemaForm, name: string, state?: 
 
 /** Props use declared transport constraints, never vendor-schema introspection. */
 export function getSchemaFieldProps(form: DefinedSchemaForm, name: string, options: FieldPropsOptions = {}): HtmlAttributes {
+  if (Object.hasOwn(form.uploads, name)) return getUploadFieldProps(form, name, options);
   const normalized = resolveTransportField(getPreparedFormTransport(form.fields, form.collections), name);
   if (normalized === null) throw new TypeError(`unknown form field: ${name}`);
   const field = normalized.declaration;
@@ -136,5 +138,7 @@ export function renderSchemaFormErrors(
     .filter(({ row }) => row === undefined || indexes[row.collection]!.has(row.index))
     .filter(({ name, declaration }) => declaration.required || declaration.type === 'boolean' || declaration.type === 'array' || Object.hasOwn(raw, name) || (state.fieldErrors[name]?.length ?? 0) > 0)
     .map(({ name, declaration }) => `<p><label for="${getSchemaFieldId(form, name, state)}">${escapeHtml(name)}</label>${renderControl(form, name, declaration, state)}${renderFieldErrors(state, name, `${getSchemaFieldId(form, name, state)}-error`)}</p>`).join('\n');
-  return `<!doctype html><html lang="${escapeHtml(state.locale)}"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><main><h1>${escapeHtml(title)}</h1>${renderErrorSummary(state, { title: options.summaryTitle, fieldId: (name) => getSchemaFieldId(form, name, state) })}<form id="${escapeHtml(form.id)}" method="post" action="${escapeHtml(form.path)}"><input type="hidden" name="_bc_csrf" value="${escapeHtml(csrfToken)}">${requestKey === undefined ? '' : `<input type="hidden" name="_bc_request" value="${escapeHtml(requestKey)}">`}${controls}<button type="submit">${escapeHtml(options.submitLabel ?? 'Submit')}</button></form></main></body></html>`;
+  const uploadControls = Object.keys(form.uploads).map((name) => `<p><label for="${formFieldId(name)}">${escapeHtml(name)}</label><input${renderAttributes(getUploadFieldProps(form, name, { state }))}>${renderFieldErrors(state, name)}</p>`).join('\n');
+  const encoding = form.multipart === undefined ? '' : ' enctype="multipart/form-data"';
+  return `<!doctype html><html lang="${escapeHtml(state.locale)}"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><main><h1>${escapeHtml(title)}</h1>${renderErrorSummary(state, { title: options.summaryTitle, fieldId: (name) => getSchemaFieldId(form, name, state) })}<form id="${escapeHtml(form.id)}" method="post" action="${escapeHtml(form.path)}"${encoding}><input type="hidden" name="_bc_csrf" value="${escapeHtml(csrfToken)}">${requestKey === undefined ? '' : `<input type="hidden" name="_bc_request" value="${escapeHtml(requestKey)}">`}${controls}${uploadControls}<button type="submit">${escapeHtml(options.submitLabel ?? 'Submit')}</button></form></main></body></html>`;
 }

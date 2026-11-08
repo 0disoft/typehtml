@@ -31,6 +31,8 @@ export interface StandardValidationOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly libraryOptions?: Record<string, unknown>;
+  /** Internal/host data isolation policy; defaults to structuredClone. */
+  readonly cloneInput?: (value: unknown) => unknown;
 }
 
 export class StandardValidationTimeoutError extends Error {
@@ -79,7 +81,7 @@ export async function validateStandard<Schema extends StandardSchemaV1>(
     throw new TypeError('expected a Standard Schema v1 validator');
   }
   const validate = props.validate;
-  const input = structuredClone(value);
+  const input = (options.cloneInput ?? structuredClone)(value);
   const deadline = performance.now() + timeoutMs;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: (() => void) | undefined;

@@ -52,7 +52,8 @@ export type BoundaryValidation<Input> = Readonly<{ ok: true; value: Input }> |
 export interface FormBoundary<Input, Output, Raw, Projected = Output> {
   readonly path: string;
   readonly limits: FormReadLimits;
-  readonly read: (request: Request) => Promise<Readonly<{ csrf: string; raw: Raw; requestKey?: string; validate: () => MaybePromise<BoundaryValidation<Input>> }>>;
+  readonly assertTransport?: (request: Request) => void;
+  readonly read: (request: Request) => Promise<Readonly<{ csrf: string; raw: Raw; requestKey?: string; dispose?: () => Promise<void>; validate: () => MaybePromise<BoundaryValidation<Input>> }>>;
   readonly validateOutput: (value: Projected, request: Request) => MaybePromise<Output>;
   readonly renderInvalid: (context: BoundaryInvalidContext<object, Raw>) => string;
 }
@@ -69,6 +70,20 @@ function failure(status: number, code: string, extra?: HeadersInit): Response {
 }
 function invoke<Args extends unknown[], Value>(hook: (...args: Args) => Value, receiver: unknown, args: Args): Value {
   return Reflect.apply(hook, receiver, args);
+}
+async function withRequestCleanup<Value>(run: (register: (dispose?: () => Promise<void>) => void) => Promise<Value>): Promise<Value> {
+  let cleanup: (() => Promise<void>) | undefined;
+  let failed = false;
+  let primary: unknown;
+  try { return await run((dispose) => { cleanup = dispose; }); }
+  catch (error) { failed = true; primary = error; throw error; }
+  finally {
+    try { await cleanup?.(); }
+    catch (error) {
+      if (failed) throw new AggregateError([primary, error], 'form operation and cleanup failed', { cause: primary });
+      throw error;
+    }
+  }
 }
 /** Both public form APIs share these checks and preserve the legacy hook order. */
 export function createBoundaryHandler<Input, Output, Principal extends object, Result, Raw, Projected = Output>(
@@ -90,48 +105,52 @@ export function createBoundaryHandler<Input, Output, Principal extends object, R
   if (!Number.isSafeInteger(rateLimitTimeoutMs) || rateLimitTimeoutMs < 1 || rateLimitTimeoutMs > 2_147_483_647) throw new TypeError('invalid rate limit timeout');
   return async (request) => {
     try {
-      const url = new URL(request.url);
-      if (url.pathname !== boundary.path) return failure(404, 'NOT_FOUND');
-      if (request.method !== 'POST') return failure(405, 'METHOD_NOT_ALLOWED', { Allow: 'POST' });
-      if (url.search !== '') return failure(400, 'UNEXPECTED_QUERY');
-      if (!acceptsHtml(request.headers.get('accept'))) return failure(406, 'NOT_ACCEPTABLE_HTML');
-      assertFormTransport(request, boundary.limits.maxBytes);
-      assertRequestOrigin(request, originPolicy);
-      const authenticated = await invoke(hooks.authenticate, options, [request]);
-      if (authenticated === null) return failure(401, 'UNAUTHENTICATED');
-      if (typeof authenticated !== 'object' || Array.isArray(authenticated)) throw new TypeError('authenticate must return a principal object or null');
-      const principal = Object.freeze({ ...authenticated });
-      if (hooks.rateLimit !== undefined) {
-        const rateLimit = hooks.rateLimit;
-        const decision = await consumeRateLimit({ consume: () => invoke(rateLimit, options, [{ request, principal }]) }, boundary.path, { signal: request.signal, timeoutMs: rateLimitTimeoutMs });
-        if (decision.allow !== true) {
-          if (!Number.isSafeInteger(decision.retryAfterSeconds) || decision.retryAfterSeconds < 1) throw new TypeError('invalid retry delay');
-          return failure(429, 'RATE_LIMITED', { 'Retry-After': String(decision.retryAfterSeconds) });
+      return await withRequestCleanup(async (registerCleanup) => {
+        const url = new URL(request.url);
+        if (url.pathname !== boundary.path) return failure(404, 'NOT_FOUND');
+        if (request.method !== 'POST') return failure(405, 'METHOD_NOT_ALLOWED', { Allow: 'POST' });
+        if (url.search !== '') return failure(400, 'UNEXPECTED_QUERY');
+        if (!acceptsHtml(request.headers.get('accept'))) return failure(406, 'NOT_ACCEPTABLE_HTML');
+        if (boundary.assertTransport === undefined) assertFormTransport(request, boundary.limits.maxBytes);
+        else boundary.assertTransport(request);
+        assertRequestOrigin(request, originPolicy);
+        const authenticated = await invoke(hooks.authenticate, options, [request]);
+        if (authenticated === null) return failure(401, 'UNAUTHENTICATED');
+        if (typeof authenticated !== 'object' || Array.isArray(authenticated)) throw new TypeError('authenticate must return a principal object or null');
+        const principal = Object.freeze({ ...authenticated });
+        if (hooks.rateLimit !== undefined) {
+          const rateLimit = hooks.rateLimit;
+          const decision = await consumeRateLimit({ consume: () => invoke(rateLimit, options, [{ request, principal }]) }, boundary.path, { signal: request.signal, timeoutMs: rateLimitTimeoutMs });
+          if (decision.allow !== true) {
+            if (!Number.isSafeInteger(decision.retryAfterSeconds) || decision.retryAfterSeconds < 1) throw new TypeError('invalid retry delay');
+            return failure(429, 'RATE_LIMITED', { 'Retry-After': String(decision.retryAfterSeconds) });
+          }
         }
-      }
-      const parsed = await boundary.read(request);
-      const expected = await invoke(hooks.csrfToken, options, [{ request, principal }]);
-      if (typeof expected !== 'string' || expected.length === 0) throw new CsrfError();
-      if (hooks.verifyCsrf === undefined) assertCsrfToken(parsed.csrf, expected);
-      else if (await invoke(hooks.verifyCsrf, options, [{ request, principal, token: parsed.csrf }]) !== true) throw new CsrfError();
-      const validation = await parsed.validate();
-      if (!validation.ok && validation.unknownKeys.length > 0) return failure(400, 'UNKNOWN_FIELD');
-      if (!validation.ok) {
-        const context = Object.freeze({ request, principal, rawValues: parsed.raw, issues: validation.issues, csrfToken: expected, ...(parsed.requestKey === undefined ? {} : { requestKey: parsed.requestKey }) });
-        const body = hooks.invalid === undefined ? boundary.renderInvalid(context) : await invoke(hooks.invalid, options, [context]);
-        if (typeof body !== 'string') throw new TypeError('invalid renderer must return HTML');
-        return html(422, body);
-      }
-      const context = Object.freeze({ request, principal, input: validation.value, ...(parsed.requestKey === undefined ? {} : { requestKey: parsed.requestKey }) });
-      request.signal.throwIfAborted();
-      if (await invoke(hooks.authorize, options, [context]) !== true) return failure(404, 'NOT_FOUND');
-      // Never start a new effect after an async guard outlives its request.
-      request.signal.throwIfAborted();
-      const result = await invoke(hooks.execute, options, [context]);
-      const projected = await invoke(hooks.project, options, [result]);
-      const output = await boundary.validateOutput(projected, request);
-      const success = await invoke(hooks.success, options, [output]);
-      return html(303, '', { Location: successLocation(success, url.origin) });
+        const parsed = await boundary.read(request);
+        registerCleanup(parsed.dispose);
+        const expected = await invoke(hooks.csrfToken, options, [{ request, principal }]);
+        if (typeof expected !== 'string' || expected.length === 0) throw new CsrfError();
+        if (hooks.verifyCsrf === undefined) assertCsrfToken(parsed.csrf, expected);
+        else if (await invoke(hooks.verifyCsrf, options, [{ request, principal, token: parsed.csrf }]) !== true) throw new CsrfError();
+        const validation = await parsed.validate();
+        if (!validation.ok && validation.unknownKeys.length > 0) return failure(400, 'UNKNOWN_FIELD');
+        if (!validation.ok) {
+          const context = Object.freeze({ request, principal, rawValues: parsed.raw, issues: validation.issues, csrfToken: expected, ...(parsed.requestKey === undefined ? {} : { requestKey: parsed.requestKey }) });
+          const body = hooks.invalid === undefined ? boundary.renderInvalid(context) : await invoke(hooks.invalid, options, [context]);
+          if (typeof body !== 'string') throw new TypeError('invalid renderer must return HTML');
+          return html(422, body);
+        }
+        const context = Object.freeze({ request, principal, input: validation.value, ...(parsed.requestKey === undefined ? {} : { requestKey: parsed.requestKey }) });
+        request.signal.throwIfAborted();
+        if (await invoke(hooks.authorize, options, [context]) !== true) return failure(404, 'NOT_FOUND');
+        // Never start a new effect after an async guard outlives its request.
+        request.signal.throwIfAborted();
+        const result = await invoke(hooks.execute, options, [context]);
+        const projected = await invoke(hooks.project, options, [result]);
+        const output = await boundary.validateOutput(projected, request);
+        const success = await invoke(hooks.success, options, [output]);
+        return html(303, '', { Location: successLocation(success, url.origin) });
+      });
     } catch (error) {
       if (error instanceof RateLimitUnavailableError || error instanceof IdempotencyError && error.status === 503) {
         try { if (hooks.onError !== undefined) invoke(hooks.onError, options, [error, request]); } catch { /* Preserve the bounded failure. */ }

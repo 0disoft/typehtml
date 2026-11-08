@@ -31,6 +31,9 @@ export interface SchemaFormProfile {
 export function getSchemaFormProfile(form: DefinedSchemaForm, options: SchemaFormManifestOptions): SchemaFormProfile {
   const collection = Object.keys(form.collections ?? {})[0];
   if (collection !== undefined) throw new SchemaProfileUnsupportedError(collection, 'NESTED_FIELD');
+  const upload = Object.keys(form.uploads ?? {})[0];
+  if (upload !== undefined) throw new SchemaProfileUnsupportedError(upload, 'UNSUPPORTED_FIELD_TYPE');
+  if (form.multipart !== undefined) throw new SchemaProfileUnsupportedError('(multipart)', 'UNSUPPORTED_FIELD_TYPE');
   const properties: Record<string, FieldSchema> = Object.create(null);
   const required: string[] = [];
   for (const [name, field] of Object.entries(form.fields)) {

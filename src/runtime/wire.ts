@@ -7,8 +7,8 @@ export class WireError extends Error {
   readonly status: WireStatus;
   readonly code: string;
 
-  constructor(status: WireStatus, code: string, message = code) {
-    super(message);
+  constructor(status: WireStatus, code: string, message = code, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'WireError';
     this.status = status;
     this.code = code;

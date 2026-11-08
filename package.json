@@ -76,7 +76,8 @@
     "docs/GETTING_STARTED.md",
     "docs/API.md",
     "docs/FORM_INTEGRATIONS.md",
-    "docs/DEVELOPER_TOOLS.md"
+    "docs/DEVELOPER_TOOLS.md",
+    "docs/UPLOADS.md"
   ],
   "publishConfig": {
     "access": "public",
@@ -104,6 +105,7 @@
   },
   "dependencies": {
     "hono": "^4",
+    "multipasta": "^0",
     "parse5": "^7"
   },
   "bin": {

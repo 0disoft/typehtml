@@ -4,7 +4,7 @@ import { escapeHtml } from './html.ts';
 import { formFieldId, type FormState } from './state.ts';
 
 export type HtmlAttributes = Readonly<Record<string, string | number | boolean | undefined>>;
-export type FieldControl = 'text' | 'number' | 'textarea' | 'select' | 'checkbox' | 'radio';
+export type FieldControl = 'text' | 'number' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'file';
 export interface FieldPropsOptions {
   readonly state?: FormState;
   readonly id?: string;
@@ -14,8 +14,8 @@ export interface FieldPropsOptions {
   readonly describedBy?: string;
 }
 
-export function getFormProps(form: Pick<DefinedForm, 'id' | 'path'>): HtmlAttributes {
-  return Object.freeze({ id: form.id, action: form.path, method: 'post', enctype: 'application/x-www-form-urlencoded' });
+export function getFormProps(form: Pick<DefinedForm, 'id' | 'path'> & Readonly<{ multipart?: unknown }>): HtmlAttributes {
+  return Object.freeze({ id: form.id, action: form.path, method: 'post', enctype: form.multipart === undefined ? 'application/x-www-form-urlencoded' : 'multipart/form-data' });
 }
 
 /**

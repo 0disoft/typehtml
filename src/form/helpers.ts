@@ -8,7 +8,7 @@ import { getPreparedFormTransport } from './transport.ts';
 export type FormWithFields = DefinedForm | DefinedSchemaForm;
 
 type FieldDeclarations<Form extends FormWithFields> = Form extends DefinedSchemaForm
-  ? Form['fields'] : Form extends DefinedForm ? Form['definition']['input']['properties'] : never;
+  ? Form['fields'] & Form['uploads'] : Form extends DefinedForm ? Form['definition']['input']['properties'] : never;
 
 /** Wire names precede transforms; an unnarrowed union permits only names shared by every form. */
 export type FormFieldName<Form extends FormWithFields> = [Form] extends [never] ? never : Extract<keyof FieldDeclarations<Form>, string>;
@@ -35,7 +35,7 @@ export function createFormHelpers<const Form extends FormWithFields>(form: Form)
   const schemaForm = 'kind' in form;
   const names = schemaForm ? form.fields : form.input.schema.properties;
   const name = <Name extends FormFieldName<Form>>(value: Name): Name => {
-    if (!Object.hasOwn(names, value)) throw new TypeError(`unknown form field: ${value}`);
+    if (!Object.hasOwn(names, value) && !(schemaForm && Object.hasOwn(form.uploads, value))) throw new TypeError(`unknown form field: ${value}`);
     return value;
   };
   const row = <Name extends FormCollectionName<Form>>(collection: Name, index: number, key: string): CollectionRowHelpers<Name, CollectionMember<Form, Name>> => {

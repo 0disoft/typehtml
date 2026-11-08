@@ -59,10 +59,10 @@ function assertCollectionDomains(fixed: FormFields, groups: PreparedFormCollecti
 }
 
 /** Shared immutable transport data for decoding, HTML helpers and static tools. */
-export function prepareFormTransport(fields: FormFields, collections: FormCollections = {}): PreparedFormTransport {
+export function prepareFormTransport(fields: FormFields, collections: FormCollections = {}, options: Readonly<{ allowEmpty?: boolean }> = {}): PreparedFormTransport {
   const groups = prepareFormCollections(collections);
   const empty = fields !== null && typeof fields === 'object' && !Array.isArray(fields) && [null, Object.prototype].includes(Object.getPrototypeOf(fields)) && Reflect.ownKeys(fields).length === 0;
-  const fixedDeclarations = empty && Object.keys(groups).length > 0 ? Object.freeze(Object.create(null)) as FormFields : prepareFields(fields);
+  const fixedDeclarations = empty && (Object.keys(groups).length > 0 || options.allowEmpty === true) ? Object.freeze(Object.create(null)) as FormFields : prepareFields(fields);
   assertCollectionDomains(fixedDeclarations, groups);
   const expanded: Record<string, FormField> = Object.assign(Object.create(null), fixedDeclarations);
   const rows: Record<string, Readonly<{ collection: string; index: number; member: string }>> = Object.create(null);
