@@ -106,6 +106,50 @@ Paths are limited to 16 segments, indexes `0` through `1023`, and 1024 declared 
 
 Boolean profile controls are checkbox-based. To model a radio/select with textual choices, use a string or integer `enum`. String/integer `control` hints support text, textarea, select, radio, and checkbox; scalar radio/checkbox props require an explicit submitted option value. Files and multipart bodies are outside these APIs.
 
+### Bounded object rows and stable UI identity
+
+Use the optional `collections` sidecar for variable-length arrays of object rows. Existing `fields` declarations and fixed indexed paths keep their meaning. Collection-only forms may declare `fields: {}`.
+
+```ts
+import {
+  appendCollectionRow, createCollectionRows, createFormHelpers, defineSchemaForm,
+  moveCollectionRow, removeCollectionRow,
+} from '@0disoft/typehtml';
+import { z } from 'zod';
+
+const orderForm = defineSchemaForm({
+  id: 'order.edit', path: '/orders', fields: {},
+  collections: {
+    items: {
+      minItems: 1, maxItems: 20, rowKey: 'rowId',
+      fields: {
+        rowId: { type: 'string', required: true, minLength: 1, maxLength: 64 },
+        quantity: { type: 'integer', required: true, minimum: 1 },
+        selected: { type: 'boolean' },
+        tags: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+      },
+    },
+  },
+  input: z.object({ items: z.array(z.object({ rowId: z.string(), quantity: z.number(), selected: z.boolean(), tags: z.array(z.string()) })) }),
+  output: z.object({ saved: z.boolean() }),
+});
+const helpers = createFormHelpers(orderForm);
+const rows = createCollectionRows([{ key: 'draft-a', value: { quantity: 1 } }], 20);
+const added = appendCollectionRow(rows, { key: 'draft-b', value: { quantity: 2 } }, 20);
+const reordered = moveCollectionRow(added, 'draft-b', 0);
+const removed = removeCollectionRow(reordered, 'draft-a');
+const row = helpers.row('items', 0, removed[0]!.key);
+row.rowKey();             // Hidden rowId props; include exactly once per submitted row.
+row.field('quantity');    // name: items[0].quantity; ID follows the stable row key.
+row.name('selected');     // Typed native/JSX binding; unknown members are rejected.
+```
+
+Pass these immutable results to your framework's existing state mechanism and render them with its normal keyed-list API. TypeHTML generates no random identity and introduces no reactive state. The application supplies a stable, unique key; add/remove/reorder helpers return new frozen arrays and row wrappers without changing or freezing the caller's values. Indexes determine wire order and must be reassigned from zero after removal or reorder. Keys remain ordinary untrusted input, are included in the decoded object, and never grant access to database records.
+
+Every submitted member activates its row, including an unchecked-independent member such as `tags`. Active rows must include the required key and required members, use contiguous indexes, and have unique keys within that collection. Missing checkbox and repeated members become `false` and `[]` only in active rows; unused capacity does not create phantom rows. An entirely absent optional collection becomes `[]`. Duplicate scalar keys, undeclared members, noncanonical indexes, out-of-range indexes, and prototype paths remain rejected. Member errors retain their exact wire paths; the default 422 page renders active rows only and preserves repeated-value order. Unique valid submitted keys keep labels, controls, and error links stable across reorder; invalid or duplicate keys use distinct index-based IDs.
+
+`maxItems` is mandatory, finite, and at most 1024. Compilation is bounded by `fixed fields + sum(max(1, maxItems) × member fields) <= 1024`; a zero-capacity collection still reserves its domain for overlap checks. Collection paths may contain fixed object segments, and members may use existing fixed nested paths, but collections cannot nest inside collection rows. Collection domains cannot overlap fixed fields or other collection domains. The existing depth, entry, key-byte, value-byte, body-byte, and deadline limits still apply. The legacy scalar Doctor projection explicitly rejects collections; the normalized transport IR exposes their exact bounded allowlist without invoking application validators.
+
 ### Validation boundaries and cancellation
 
 `validateStandard(schema, value, { signal, timeoutMs, libraryOptions })` can also be called directly. It validates an isolated structured clone, supports synchronous and asynchronous Standard Schema v1 implementations, and returns a standard success or issue result. `InferStandardInput`, `InferStandardOutput`, and `StandardSchemaV1` are exported types. `standardIssuesToInputIssues` maps vendor issue paths to native issue names; schema form handlers additionally map array-element issues to the declared repeated field.

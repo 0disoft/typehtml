@@ -17,6 +17,13 @@ function rich(fields: FormFields) {
 }
 
 describe('Standard Schema form static profile bridge', () => {
+  it('rejects a collection instead of silently projecting only the fixed fields', () => {
+    const form = defineSchemaForm({ id: 'rows.save', path: '/rows', fields: { title: { type: 'string' } }, input: identity, output: identity,
+      collections: { items: { maxItems: 2, rowKey: 'key', fields: { key: { type: 'string', required: true, minLength: 1, maxLength: 64 } } } },
+    });
+    expect(() => getSchemaFormProfile(form, { output })).toThrow(SchemaProfileUnsupportedError);
+    expect(() => schemaFormManifest(form, { output })).toThrow('items');
+  });
   it('preserves explicitly declared scalar constraints, required fields, paths and limits', () => {
     const form = rich({
       name: { type: 'string', required: true, control: 'textarea', minLength: 1, maxLength: 40 },

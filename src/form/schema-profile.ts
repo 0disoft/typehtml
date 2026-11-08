@@ -29,6 +29,8 @@ export interface SchemaFormProfile {
  * Arrays, booleans and nested paths are rejected until Doctor can represent them faithfully.
  */
 export function getSchemaFormProfile(form: DefinedSchemaForm, options: SchemaFormManifestOptions): SchemaFormProfile {
+  const collection = Object.keys(form.collections ?? {})[0];
+  if (collection !== undefined) throw new SchemaProfileUnsupportedError(collection, 'NESTED_FIELD');
   const properties: Record<string, FieldSchema> = Object.create(null);
   const required: string[] = [];
   for (const [name, field] of Object.entries(form.fields)) {

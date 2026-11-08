@@ -8,6 +8,7 @@ export * from './i18n.ts';
 export * from './standard-schema.ts';
 export * from './fields.ts';
 export * from './transport.ts';
+export * from './collections.ts';
 export * from './schema-form.ts';
 export * from './schema-html.ts';
 export * from './schema-profile.ts';
