@@ -166,6 +166,33 @@ describe('shared native initial/invalid rendering', () => {
     expect(() => renderNativeField(uploads, 'documents', undefined, { control: 'text' })).toThrow('file controls');
   });
 
+  it('does not silently discard a scalar value when its current choice becomes disabled', () => {
+    const choices = [{ value: 'red', label: 'Red' }, { value: 'blue', label: 'Blue', disabled: true }];
+    const state = createFormState({ color: 'blue', channel: 'blue' }, [{ field: 'color', code: 'SCHEMA', message: 'Choose another color' }]);
+    for (const [name, control] of [['color', 'select'], ['channel', 'radio']] as const) {
+      const html = renderNativeField(form, name, state, { control, choices });
+      expect(successful(html)).toEqual([[name, 'blue']]);
+      // Keep the rejected value editable without enabling a disabled choice in the host's list.
+      expect(elements(html).find((element) => attr(element, 'name') === name)?.tagName).toBe('input');
+      expect(html).toContain('type="text"');
+    }
+    const booleanHtml = renderNativeField(form, 'accepted', undefined, { choices: [{ value: 'no', disabled: true }, { value: 'yes' }] });
+    expect(successful(booleanHtml)).toEqual([['accepted', 'no']]);
+    expect(choices[1]!.disabled).toBe(true);
+  });
+
+  it('rejects scalar boolean control overrides that would change checkbox submission semantics', () => {
+    const booleans = defineSchemaForm({ id: 'boolean.edit', path: '/boolean', fields: {
+      enabled: { type: 'boolean' }, explicit: { type: 'boolean', trueValue: 'yes', falseValue: 'no' },
+    }, input: z.unknown(), output: z.unknown() });
+    for (const control of ['text', 'number', 'textarea', 'radio'] as const) {
+      expect(() => renderNativeField(booleans, 'enabled', undefined, { control })).toThrow('boolean');
+      expect(() => renderNativeField(booleans, 'explicit', undefined, { control })).toThrow('boolean');
+    }
+    expect(successful(renderNativeField(booleans, 'enabled'))).toEqual([]);
+    expect(successful(renderNativeField(booleans, 'explicit', undefined, { control: 'select' }))).toEqual([['explicit', 'no']]);
+  });
+
   it('uses select/checkbox choices only when native submission preserves the exact repeated sequence', () => {
     const choices = [{ value: 'a', label: '<Alpha>' }, { value: 'b', label: 'Beta' }, { value: 'c', label: 'Gamma', disabled: true }];
     const selections = defineSchemaForm({ id: 'choices.edit', path: '/choices', fields: {

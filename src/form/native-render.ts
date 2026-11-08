@@ -60,6 +60,7 @@ export function renderNativeField(
   const item = field.type === 'array' ? field.items : field;
   const control = options.control ?? field.control ?? (item.type === 'boolean' ? 'checkbox' : 'text');
   if (!['text', 'number', 'textarea', 'select', 'checkbox', 'radio'].includes(control)) throw new TypeError('unsupported field control');
+  if (field.type !== 'array' && item.type === 'boolean' && !['checkbox', 'select'].includes(control)) throw new TypeError('scalar boolean controls require checkbox or an explicit falseValue select');
   if (field.type !== 'array' && item.type === 'boolean' && control === 'select' && item.falseValue === undefined) throw new TypeError('boolean select controls require an explicit falseValue');
   const props = (kind = control, controlId = id, optionValue?: string, fieldState = state): HtmlAttributes => Object.freeze({
     ...getSchemaFieldProps(form, name, { state: fieldState, control: kind, id: controlId, optionValue }), 'aria-describedby': describedBy,
@@ -99,6 +100,16 @@ export function renderNativeField(
       const input = /[\r\n]/.test(value) ? textarea(attributes, value) : `<input${renderAttributes(attributes)}>`;
       return `<label for="${escapeHtml(controlId)}">${escapeHtml(label)} ${index + 1}</label>${input}`;
     }).join(''), visible.length === 0);
+  }
+
+  // A selected disabled option/radio is omitted by native submission. Preserve the rejected
+  // scalar in an editable text control, as the repeated-field fallback already does.
+  const selectedScalar = typeof raw === 'string' ? raw : item.type === 'boolean' ? item.falseValue : item.const === undefined ? undefined : String(item.const);
+  if ((['select', 'radio'].includes(control) || item.type === 'boolean' && item.falseValue !== undefined) && choices.some((choice) => choice.disabled && choice.value === selectedScalar)) {
+    const { checked: _checked, ...original } = props('text');
+    const attributes = item.type === 'boolean' ? { ...original, type: 'text', value: selectedScalar, required: undefined } : original;
+    return wrap(typeof selectedScalar === 'string' && /[\r\n]/.test(selectedScalar)
+      ? textarea(attributes, selectedScalar) : `<input${renderAttributes(attributes)}>`);
   }
 
   if ('const' in item && item.const !== undefined && !choiceValues.has(String(item.const))) { choices.push({ value: String(item.const) }); choiceValues.add(String(item.const)); }

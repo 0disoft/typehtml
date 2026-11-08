@@ -173,4 +173,16 @@ describe('host-owned submission tasks', () => {
     expect((observed as AggregateError).errors).toEqual([original, notification]);
     await expect(task.run(() => 'next')).resolves.toBe('next');
   });
+
+  it('does not leave an orphaned abort rejection when a host scheduler aborts and throws synchronously', async () => {
+    const parent = new AbortController();
+    const scheduling = new Error('scheduler failed after expiration');
+    let attempts = 0;
+    const task = createSubmissionTask({ signal: parent.signal, schedule: (expire) => { expire(); throw scheduling; } });
+    await expect(task.run(() => { attempts++; return 1; })).rejects.toBe(scheduling);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(attempts).toBe(0);
+    expect(task.getSnapshot().pending).toBe(false);
+    expect(getEventListeners(parent.signal, 'abort')).toHaveLength(0);
+  });
 });

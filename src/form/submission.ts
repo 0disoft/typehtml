@@ -85,13 +85,15 @@ export function createSubmissionTask<T>(options: SubmissionTaskOptions<T> = {}):
         }
         signal.throwIfAborted();
         publish({ status: 'submitting', pending: true, sequence: current });
+        // A host scheduler may expire synchronously and then throw. Do not create an abort
+        // rejection until scheduling succeeds; the listener below also observes prior aborts.
+        cleanups.push(schedule(() => controller.abort(new DOMException('submission timed out', 'TimeoutError')), timeoutMs));
         const stopped = new Promise<never>((_resolve, reject) => {
           const abort = () => reject(signal.reason);
           signal.addEventListener('abort', abort, { once: true });
           cleanups.push(() => signal.removeEventListener('abort', abort));
           if (signal.aborted) abort();
         });
-        cleanups.push(schedule(() => controller.abort(new DOMException('submission timed out', 'TimeoutError')), timeoutMs));
         const pending = Promise.resolve().then(() => { signal.throwIfAborted(); return task({ signal }); });
         const value = await Promise.race([pending, stopped]);
         signal.throwIfAborted();
