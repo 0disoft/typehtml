@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { initProject } from '../src/init.ts';
 import { VERSION } from '../src/version.ts';
 
@@ -43,6 +44,59 @@ describe('standalone starter creation', () => {
       await expect(initProject({ directory: occupied })).rejects.toThrow('not empty');
       expect(await readdir(occupied)).toEqual(['keep.txt']);
       expect(await readFile(join(occupied, 'keep.txt'), 'utf8')).toBe('keep');
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('vendors a local archive without installation and keeps its dependency portable after moving the app', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'typehtml-init-package-'));
+    try {
+      const source = join(parent, 'local package.tgz');
+      // The initializer copies gzip bytes; package managers validate tar/package contents at installation.
+      const archive = gzipSync('archive fixture');
+      await writeFile(source, archive);
+      const directory = join(parent, 'app');
+      const result = await initProject({ directory, packageManager: 'npm', packageSource: source });
+      expect(result.files).toContain('vendor/typehtml.tgz');
+      expect(result.nextCommands[0]).toEqual(['npm', 'install']);
+      expect((await readFile(join(directory, 'vendor/typehtml.tgz'))).equals(archive)).toBe(true);
+      const moved = join(parent, 'moved app');
+      await rename(directory, moved);
+      const manifest = JSON.parse(await readFile(join(moved, 'package.json'), 'utf8'));
+      expect(manifest.dependencies['@0disoft/typehtml']).toBe('file:./vendor/typehtml.tgz');
+      expect((await readFile(join(moved, 'vendor/typehtml.tgz'))).equals(archive)).toBe(true);
+      expect((await readFile(source)).equals(archive)).toBe(true);
+      expect(await readdir(moved)).not.toContain('node_modules');
+      expect((await readdir(parent)).filter((name) => name.startsWith('.typehtml-init-'))).toEqual([]);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid package sources before creating or changing a starter target', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'typehtml-init-bad-package-'));
+    try {
+      const empty = join(parent, 'existing empty app');
+      await mkdir(empty);
+      const text = join(parent, 'text.tgz');
+      const short = join(parent, 'short.tgz');
+      const large = join(parent, 'large.tgz');
+      const directory = join(parent, 'directory.tgz');
+      await writeFile(text, 'not gzip');
+      await writeFile(short, new Uint8Array([0x1f]));
+      await writeFile(large, '');
+      await truncate(large, 64 * 1024 * 1024 + 1);
+      await mkdir(directory);
+      const sources = ['', 'wrong.zip', join(parent, 'missing.tgz'), text, short, large, directory];
+      for (const packageSource of sources) {
+        await expect(initProject({ directory: empty, packageSource })).rejects.toThrow();
+        expect(await readdir(empty)).toEqual([]);
+        expect((await readdir(parent)).filter((name) => name.startsWith('.typehtml-init-'))).toEqual([]);
+      }
+      const absent = join(parent, 'not-created', 'app');
+      await expect(initProject({ directory: absent, packageSource: text })).rejects.toThrow('gzip');
+      expect(await readdir(parent)).not.toContain('not-created');
     } finally {
       await rm(parent, { recursive: true, force: true });
     }

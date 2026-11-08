@@ -106,13 +106,11 @@ async function freePort(): Promise<number> {
 }
 
 async function starter(directory: string, installedCli: string): Promise<void> {
-  const created = JSON.parse(await run('installed CLI init', [node!, installedCli, 'init', directory, '--package-manager', 'npm'], dirname(directory)));
+  const created = JSON.parse(await run('installed CLI init', [node!, installedCli, 'init', directory, '--package-manager', 'npm', '--package-source', artifact], dirname(directory)));
   expect(created.status === 'created', 'installed init did not create the starter');
   const appPackagePath = join(directory, 'package.json');
   const appPackage = JSON.parse(await readFile(appPackagePath, 'utf8'));
-  // Only the disposable test app uses a tarball override; generated app dependencies stay publishable.
-  appPackage.dependencies['@0disoft/typehtml'] = pathToFileURL(artifact).href;
-  await writeFile(appPackagePath, JSON.stringify(appPackage, null, 2));
+  expect(appPackage.dependencies['@0disoft/typehtml'] === 'file:./vendor/typehtml.tgz', 'starter local dependency was not written automatically');
   await run('starter fresh npm install', [...npm, 'install', '--ignore-scripts', '--no-audit', '--no-fund'], directory);
   const cli = join(directory, 'node_modules/@0disoft/typehtml/dist/cli.js');
   const generate = ['generate', '--form', 'form.json', '--out-dir', 'generated', '--root', '.'];

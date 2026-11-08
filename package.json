@@ -93,6 +93,8 @@
     "build": "bun scripts/build.ts",
     "prepack": "bun run build",
     "pack": "bun scripts/pack.ts",
+    "starter:pack": "bun scripts/starter-kit.ts",
+    "starter:smoke": "bun scripts/starter-kit-smoke.ts",
     "package:smoke": "bun scripts/package-smoke.ts",
     "doctor": "bun src/cli.ts doctor",
     "generate": "bun src/cli.ts generate --contract docs/design/v0.5/examples/order.boundary.json --out-dir src/generated",

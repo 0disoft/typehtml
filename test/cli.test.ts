@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { VERSION } from '../src/version.ts';
 
 const CLI = resolve(import.meta.dir, '../src/cli.ts');
@@ -19,15 +20,39 @@ describe('TypeHTML CLI', () => {
     expect(help.exitCode).toBe(0);
     expect(help.stdout).toContain('typehtml init <directory>');
     expect(help.stdout).toContain('--form <file>');
+    expect(help.stdout).toContain('--package-source <local.tgz>');
     expect(help.stdout).toContain('does not install dependencies');
   });
 
   it('rejects duplicate or unsupported options with one JSON error report', () => {
-    for (const args of [[], ['init'], ['init', 'app', '--package-manager', 'yarn'], ['init', 'a', 'b'], ['generate', '--form', 'a', '--contract', 'b', '--out-dir', 'out']]) {
+    for (const args of [[], ['init'], ['init', 'app', '--package-manager', 'yarn'], ['init', 'a', 'b'], ['init', 'app', '--package-source'], ['init', 'app', '--package-source', '--package-manager', 'npm'], ['init', 'app', '--package-source', 'a.tgz', '--package-source', 'b.tgz'], ['generate', '--form', 'a', '--contract', 'b', '--out-dir', 'out']]) {
       const result = cli(...args);
       expect(result.exitCode).toBe(2);
       expect(JSON.parse(result.stdout).status).toBe('configuration-error');
       expect(result.stderr).toBe('');
+    }
+  });
+
+  it('resolves a relative local package path and copies it into a starter containing spaces', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'typehtml-cli-package-'));
+    try {
+      const archive = gzipSync('archive fixture');
+      await writeFile(join(parent, 'local package.tgz'), archive);
+      const result = Bun.spawnSync([process.execPath, CLI, 'init', 'app with spaces', '--package-source', 'local package.tgz', '--package-manager', 'npm'], { cwd: parent });
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr.toString()).toBe('');
+      const report = JSON.parse(result.stdout.toString());
+      expect(report.files).toContain('vendor/typehtml.tgz');
+      const target = join(parent, 'app with spaces');
+      const manifest = JSON.parse(await readFile(join(target, 'package.json'), 'utf8'));
+      expect(manifest.dependencies['@0disoft/typehtml']).toBe('file:./vendor/typehtml.tgz');
+      expect((await readFile(join(target, 'vendor/typehtml.tgz'))).equals(archive)).toBe(true);
+      const invalid = cli('init', join(parent, 'invalid app'), '--package-source', join(parent, 'missing.tgz'));
+      expect(invalid.exitCode).toBe(2);
+      expect(JSON.parse(invalid.stdout).status).toBe('error');
+      expect(invalid.stderr).toBe('');
+    } finally {
+      await rm(parent, { recursive: true, force: true });
     }
   });
 

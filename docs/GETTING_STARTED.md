@@ -14,20 +14,33 @@ Use npm or Bun to install dependencies. Choosing npm in `init` changes the packa
 
 ## Install the current alpha before registry publication
 
+The starter kit archive in `artifacts/typehtml-starter-<version>.tar.gz` contains a standalone initializer, the local npm tarball, a guide, and the optional VSIX. Extract it, then run:
+
+```sh
+node create-typehtml.mjs ../my-app --package-manager npm
+cd ../my-app
+npm install
+npm run generate
+npm run doctor
+npm run dev
+```
+
+No source checkout or manual dependency edit is needed. The initializer copies the tarball to `vendor/typehtml.tgz` and records `file:./vendor/typehtml.tgz`. Third-party dependencies may still require network access. Maintainers build the kit with `bun run build`, `bun run pack`, then `bun run starter:pack`.
+
 The repository builds an installable npm tarball. Registry publication is a separate step; do not install the unrelated unscoped `typehtml` package.
 
 ```sh
 # Run from the TypeHTML repository.
 bun install
 bun run pack
-node dist/cli.js init ../my-typehtml-app --package-manager bun
+node dist/cli.js init ../my-typehtml-app --package-manager bun --package-source artifacts/0disoft-typehtml-0.1.0-alpha.5.tgz
 ```
 
-The package artifact is `artifacts/0disoft-typehtml-0.1.0-alpha.5.tgz`. In the generated project, replace the registry dependency with that local file:
+The package artifact is copied into the generated project automatically:
 
 ```sh
 cd ../my-typehtml-app
-bun add /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.5.tgz
+bun install
 bun run generate
 bun run doctor
 bun run dev
@@ -37,9 +50,9 @@ For npm installation:
 
 ```sh
 # Run the initializer from the built TypeHTML checkout.
-node dist/cli.js init ../my-typehtml-app --package-manager npm
+node dist/cli.js init ../my-typehtml-app --package-manager npm --package-source artifacts/0disoft-typehtml-0.1.0-alpha.5.tgz
 cd ../my-typehtml-app
-npm install /absolute/path/artifacts/0disoft-typehtml-0.1.0-alpha.5.tgz
+npm install
 npm run generate
 npm run doctor
 npm run dev

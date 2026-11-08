@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, readdir, rename, rm, rmdir, writeFile, lstat } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readdir, rename, rm, rmdir, writeFile, lstat } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { VERSION } from './version.ts';
 
 export type PackageManager = 'bun' | 'npm';
-export type InitOptions = Readonly<{ directory: string; packageManager?: PackageManager }>;
+export type InitOptions = Readonly<{ directory: string; packageManager?: PackageManager; packageSource?: string }>;
 export type InitResult = Readonly<{
   format: 'typehtml-init/1';
   status: 'created';
@@ -13,6 +13,9 @@ export type InitResult = Readonly<{
   packageManager: PackageManager;
   nextCommands: readonly (readonly string[])[];
 }>;
+
+const VENDORED_PACKAGE = 'vendor/typehtml.tgz';
+const MAX_PACKAGE_BYTES = 64 * 1024 * 1024;
 
 /** Create a standalone local example without installing dependencies or starting a server. */
 export async function initProject(options: InitOptions): Promise<InitResult> {
@@ -30,12 +33,20 @@ export async function initProject(options: InitOptions): Promise<InitResult> {
   } catch (error) {
     if (!isMissing(error)) throw error;
   }
-  const files = starterFiles(directory, packageManager);
+  const archive = options.packageSource === undefined ? undefined : await readPackageSource(options.packageSource);
+  const files: Readonly<Record<string, string | Uint8Array>> = {
+    ...starterFiles(directory, packageManager, archive !== undefined),
+    ...(archive === undefined ? {} : { [VENDORED_PACKAGE]: archive }),
+  };
   await mkdir(parent, { recursive: true });
   const stage = await mkdtemp(resolve(parent, '.typehtml-init-'));
   let removedEmptyTarget = false;
   try {
-    for (const [name, contents] of Object.entries(files)) await writeFile(resolve(stage, name), contents, { flag: 'wx' });
+    for (const [name, contents] of Object.entries(files)) {
+      const file = resolve(stage, name);
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, contents, { flag: 'wx' });
+    }
     if (existed) {
       // rmdir refuses a target populated while the starter was being prepared.
       if ((await lstat(directory)).isSymbolicLink()) throw new Error('starter target changed while preparing files');
@@ -63,14 +74,40 @@ function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
-function starterFiles(directory: string, packageManager: PackageManager): Readonly<Record<string, string>> {
+/** Copy bytes only: npm/Bun validates the package manifest when the user installs it. */
+async function readPackageSource(source: string): Promise<Uint8Array> {
+  if (typeof source !== 'string' || source.trim() === '' || /[\u0000-\u001f]/u.test(source) || !/\.tgz$/iu.test(source)) {
+    throw new TypeError('package source must be a local .tgz file path');
+  }
+  const file = await open(resolve(source), 'r');
+  try {
+    const info = await file.stat();
+    if (!info.isFile()) throw new TypeError('package source must be a regular file');
+    if (info.size < 2 || info.size > MAX_PACKAGE_BYTES) throw new RangeError('package source must contain 2 bytes through 64 MiB');
+    const bytes = Buffer.alloc(info.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
+      if (bytesRead === 0) throw new Error('package source changed while it was being read');
+      offset += bytesRead;
+    }
+    if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) throw new TypeError('package source must be a gzip-compressed .tgz file');
+    const { bytesRead } = await file.read(Buffer.alloc(1), 0, 1, bytes.length);
+    if (bytesRead !== 0) throw new Error('package source changed while it was being read');
+    return bytes;
+  } finally {
+    await file.close();
+  }
+}
+
+function starterFiles(directory: string, packageManager: PackageManager, vendored = false): Readonly<Record<string, string>> {
   const name = basename(directory).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '') || 'typehtml-app';
   const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
   const generate = 'typehtml generate --form form.json --out-dir generated --root .';
   return {
     'package.json': json({ name, version: '0.0.0', private: true, type: 'module', engines: { bun: '>=1.4.0' }, scripts: {
       dev: 'bun run generate && bun server.ts', start: 'bun run generate && bun server.ts', generate, 'generate:check': `${generate} --check`, doctor: 'typehtml doctor --config doctor.config.json',
-    }, dependencies: { '@0disoft/typehtml': `^${VERSION}` } }),
+    }, dependencies: { '@0disoft/typehtml': vendored ? `file:./${VENDORED_PACKAGE}` : `^${VERSION}` } }),
     'form.json': json({ format: 'typehtml-form/1', id: 'greeting.create', path: '/greet', input: {
       type: 'object', additionalProperties: false, required: ['name', 'quantity'], properties: {
         name: { type: 'string', minLength: 1, maxLength: 80 }, quantity: { type: 'integer', minimum: 1, maximum: 20 },
