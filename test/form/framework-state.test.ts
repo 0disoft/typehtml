@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { createReactSubmissionHook, toReactFieldProps, type ReactStateHooks } from '../../src/integrations/react.ts';
-import { connectSvelteSubmission, type HostWritableFactory } from '../../src/integrations/svelte.ts';
+import { createReactSubmissionHook, toReactFieldProps, focusNativeErrorSummary as reactFocus, type ReactStateHooks } from '../../src/integrations/react.ts';
+import { connectSvelteSubmission, focusNativeErrorSummary as svelteFocus, type HostWritableFactory } from '../../src/integrations/svelte.ts';
+import { focusNativeErrorSummary } from '../../src/form/native-render.ts';
 import type { SubmissionState } from '../../src/form/submission.ts';
 
 /** Minimal host hooks exercise the public injection contract, effects, and Strict Mode remounts. */
@@ -39,6 +40,20 @@ function reactHost() {
 }
 
 describe('optional host framework connections', () => {
+  it('shares the existing focus helper through browser-safe framework entry points', () => {
+    expect(reactFocus).toBe(focusNativeErrorSummary);
+    expect(svelteFocus).toBe(focusNativeErrorSummary);
+    const calls: unknown[] = [];
+    const root = { querySelector(selector: string) {
+      calls.push(selector);
+      return { focus: (options: FocusOptions) => calls.push(options) };
+    } } as unknown as Pick<ParentNode, 'querySelector'>;
+    expect(reactFocus(root, { preventScroll: true })).toBe(true);
+    expect(calls).toEqual(['[data-typehtml-error-summary]', { preventScroll: true }]);
+    const absent = { querySelector: () => null } as Pick<ParentNode, 'querySelector'>;
+    expect(svelteFocus(absent)).toBe(false);
+  });
+
   it('uses React state and handles Strict Mode cleanup/remount without retaining a disposed controller', async () => {
     const host = reactHost();
     const useSubmission = createReactSubmissionHook(host.hooks);

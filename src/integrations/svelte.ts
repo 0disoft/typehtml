@@ -1,5 +1,7 @@
 import { createSubmissionTask, initialSubmissionState, type SubmissionState, type SubmissionTask, type SubmissionTaskOptions } from '../form/submission.ts';
 
+export { focusNativeErrorSummary } from '../form/focus.ts';
+
 export interface HostWritable<T> {
   subscribe(run: (value: T) => void): () => void;
   set(value: T): void;

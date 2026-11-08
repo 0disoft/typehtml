@@ -5,6 +5,8 @@ import { getSchemaFieldId, getSchemaFieldProps } from './schema-html.ts';
 import { createFormState, renderErrorSummary, renderFieldErrors, type FormState } from './state.ts';
 import { getActiveTransportRows, getPreparedFormTransport, resolveTransportField } from './transport.ts';
 
+export { focusNativeErrorSummary } from './focus.ts';
+
 export interface NativeChoice { readonly value: string; readonly label?: string; readonly disabled?: boolean }
 export interface NativeFieldOptions {
   readonly label?: string;
@@ -166,12 +168,4 @@ export function renderNativeErrorSummary(state: FormState, options: Readonly<{ t
   const id = options.id ?? 'typehtml-errors';
   const summary = renderErrorSummary(state, { title: options.title, id: `${id}-title`, fieldId: options.fieldId });
   return summary.replace('<section', `<section${renderAttributes({ id, tabindex: -1, autofocus: options.autofocus, 'data-typehtml-error-summary': true })}`);
-}
-
-/** Call after the host commits an invalid state; no DOM globals are accessed until the call. */
-export function focusNativeErrorSummary(root: Pick<ParentNode, 'querySelector'>, options: FocusOptions = {}): boolean {
-  const summary = root.querySelector<HTMLElement>('[data-typehtml-error-summary]');
-  if (summary === null) return false;
-  summary.focus(options);
-  return true;
 }

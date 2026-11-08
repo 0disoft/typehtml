@@ -1,6 +1,8 @@
 import { createSubmissionTask, initialSubmissionState, type SubmissionState, type SubmissionTask, type SubmissionTaskOptions } from '../form/submission.ts';
 import type { HtmlAttributes } from '../form/attributes.ts';
 
+export { focusNativeErrorSummary } from '../form/focus.ts';
+
 /** Pass the application's existing React hooks; React is never imported or bundled by TypeHTML. */
 export interface ReactStateHooks {
   useState<T>(initial: () => T): [T, (value: T) => void];
