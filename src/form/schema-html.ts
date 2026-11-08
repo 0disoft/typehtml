@@ -5,11 +5,13 @@ import type { FormField } from './fields.ts';
 import { escapeHtml } from './html.ts';
 import type { DefinedSchemaForm } from './schema-form.ts';
 import { createFormState, formFieldId, renderErrorSummary, renderFieldErrors, type FormStateOptions } from './state.ts';
+import { getPreparedFormTransport, resolveTransportField } from './transport.ts';
 
 /** Props use declared transport constraints, never vendor-schema introspection. */
 export function getSchemaFieldProps(form: DefinedSchemaForm, name: string, options: FieldPropsOptions = {}): HtmlAttributes {
-  if (!Object.hasOwn(form.fields, name)) throw new TypeError(`unknown form field: ${name}`);
-  const field = form.fields[name]!;
+  const normalized = resolveTransportField(getPreparedFormTransport(form.fields), name);
+  if (normalized === null) throw new TypeError(`unknown form field: ${name}`);
+  const field = normalized.declaration;
   const item = field.type === 'array' ? field.items : field;
   const control = options.control ?? field.control ?? (item.type === 'boolean' ? 'checkbox' : field.type === 'array' ? 'select' : 'text');
   if (field.type === 'array' && control === 'text') {
@@ -88,8 +90,8 @@ export function renderSchemaFormErrors(
 ): string {
   const state = createFormState(raw, issues, options);
   const title = options.title ?? 'Check your form';
-  const controls = Object.entries(form.fields)
-    .filter(([name, field]) => field.required || field.type === 'boolean' || field.type === 'array' || Object.hasOwn(raw, name) || (state.fieldErrors[name]?.length ?? 0) > 0)
-    .map(([name, field]) => `<p><label for="${formFieldId(name)}">${escapeHtml(name)}</label>${renderControl(form, name, field, state)}${renderFieldErrors(state, name)}</p>`).join('\n');
+  const controls = getPreparedFormTransport(form.fields).fields
+    .filter(({ name, declaration }) => declaration.required || declaration.type === 'boolean' || declaration.type === 'array' || Object.hasOwn(raw, name) || (state.fieldErrors[name]?.length ?? 0) > 0)
+    .map(({ name, declaration }) => `<p><label for="${formFieldId(name)}">${escapeHtml(name)}</label>${renderControl(form, name, declaration, state)}${renderFieldErrors(state, name)}</p>`).join('\n');
   return `<!doctype html><html lang="${escapeHtml(state.locale)}"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><main><h1>${escapeHtml(title)}</h1>${renderErrorSummary(state, { title: options.summaryTitle })}<form id="${escapeHtml(form.id)}" method="post" action="${escapeHtml(form.path)}"><input type="hidden" name="_bc_csrf" value="${escapeHtml(csrfToken)}">${requestKey === undefined ? '' : `<input type="hidden" name="_bc_request" value="${escapeHtml(requestKey)}">`}${controls}<button type="submit">${escapeHtml(options.submitLabel ?? 'Submit')}</button></form></main></body></html>`;
 }

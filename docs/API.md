@@ -1,5 +1,7 @@
 # Public API
 
+`prepareFormTransport(fields)` creates the immutable `typehtml-transport/1` wire contract shared by schema handlers and HTML helpers. It records canonical names/paths, scalar or repeated cardinality, presence/count limits, and missing-value behavior (`absent`, `false`, or `empty-array`). `resolveTransportField(transport, name)` performs an exact indexed lookup; it never infers a path from a submitted key. Caller-owned declarations remain mutable and are never cached; only owned frozen snapshots are reused. Existing required-field and minimum-count error precedence is preserved.
+
 The `0.1.0-alpha.5` API is ESM with TypeScript declarations. Import documented package entry points instead of files under `src/` or `dist/`. Existing flat forms retain their behavior. See [Form integrations](FORM_INTEGRATIONS.md) for Standard Schema, rich fields, attributes/i18n, security, idempotency, and Doctor developer tools.
 
 See [Developer tools](DEVELOPER_TOOLS.md) for `createFormHelpers`, `createFormMessages`, `resolveFormLocale`, native Request testing, static catalogs, and the optional VS Code saved-snapshot connection. These features are opt-in and preserve existing error formats.

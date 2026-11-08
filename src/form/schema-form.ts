@@ -1,6 +1,7 @@
 import { defineForm } from './definition.ts';
 import { createBoundaryHandler, type BoundaryHooks, type RawFormValues } from './boundary.ts';
-import { decodeFormFields, prepareFields, type FormFields } from './fields.ts';
+import { decodeFormFields, type FormFields } from './fields.ts';
+import { getPreparedFormTransport, prepareFormTransport, resolveTransportField } from './transport.ts';
 import { readUrlEncodedEntries, WireError, type FormReadLimits, type FormEntry } from '../runtime/wire.ts';
 import { validateStandard, standardIssuesToInputIssues, type AnyStandardSchema, type InferStandardInput, type InferStandardOutput } from './standard-schema.ts';
 import { renderSchemaFormErrors } from './schema-html.ts';
@@ -56,9 +57,10 @@ export function defineSchemaForm<const Fields extends FormFields, Input extends 
   const base = defineForm({ id: definition.id, path: definition.path, input: marker, output: marker, ...(definition.limits === undefined ? {} : { limits: definition.limits }), ...(definition.protocol === undefined ? {} : { protocol: definition.protocol }) });
   const validationTimeoutMs = definition.validationTimeoutMs ?? 30_000;
   if (!Number.isSafeInteger(validationTimeoutMs) || validationTimeoutMs < 1 || validationTimeoutMs > 2_147_483_647) throw new TypeError('invalid validation timeout');
+  const transport = prepareFormTransport(definition.fields);
   return Object.freeze({
     kind: 'typehtml-schema-form/1', id: base.id, path: base.path,
-    fields: prepareFields(definition.fields) as Fields,
+    fields: transport.declarations as Fields,
     input: captureSchema(definition.input), output: captureSchema(definition.output), limits: base.limits,
     validationTimeoutMs, runtimeValidationCoverage: 'not-statically-analyzed',
     ...(base.definition.protocol === undefined ? {} : { protocol: base.definition.protocol }),
@@ -68,8 +70,7 @@ export function defineSchemaForm<const Fields extends FormFields, Input extends 
 export function createSchemaFormHandler<Fields extends FormFields, Input extends AnyStandardSchema, Output extends AnyStandardSchema, Principal extends object, Result>(
   form: DefinedSchemaForm<Fields, Input, Output>, options: SchemaFormHandlerOptions<InferStandardOutput<Input>, InferStandardOutput<Output>, Principal, Result, InferStandardInput<Output>>,
 ): (request: Request) => Promise<Response> {
-  const names = Object.freeze(Object.keys(form.fields));
-  const repeatable = Object.freeze(names.filter((name) => form.fields[name]!.type === 'array'));
+  const transport = getPreparedFormTransport(form.fields);
   if (form.protocol?.requestKey === 'required' && options.acceptRequestKey === false) throw new TypeError('handler cannot disable the declared request key');
   const acceptRequestKey = options.acceptRequestKey === true || form.protocol?.requestKey === 'required';
   // Snapshot localization config, preserving callback functions but never freezing caller state.
@@ -77,7 +78,7 @@ export function createSchemaFormHandler<Fields extends FormFields, Input extends
   return createBoundaryHandler({
     path: form.path, limits: form.limits,
     read: async (request) => {
-      const entries = await readUrlEncodedEntries(request, form.limits, {}, { names, repeatable });
+      const entries = await readUrlEncodedEntries(request, form.limits, {}, transport);
       let csrf: string | undefined;
       let requestKey: string | undefined;
       const business: FormEntry[] = [];
@@ -92,26 +93,27 @@ export function createSchemaFormHandler<Fields extends FormFields, Input extends
       if (requestKey !== undefined && !/^[A-Za-z0-9_-]{16,128}$/.test(requestKey)) throw new WireError(400, 'INVALID_REQUEST_KEY');
       const raw: Record<string, string | readonly string[]> = Object.create(null);
       for (const entry of business) {
-        if (!Object.hasOwn(form.fields, entry.key)) continue;
-        if (form.fields[entry.key]!.type === 'array') {
+        const field = resolveTransportField(transport, entry.key);
+        if (field === null) continue;
+        if (field.cardinality === 'repeated') {
           const values = raw[entry.key] as string[] | undefined;
           if (values === undefined) raw[entry.key] = [entry.value]; else values.push(entry.value);
         } else raw[entry.key] = entry.value;
       }
       for (const value of Object.values(raw)) if (Array.isArray(value)) Object.freeze(value);
       return { csrf, raw: Object.freeze(raw), ...(requestKey === undefined ? {} : { requestKey }), validate: async () => {
-        const decoded = decodeFormFields(form.fields, business);
+        const decoded = decodeFormFields(transport.declarations, business);
         if (!decoded.validation.ok) return decoded.validation;
         const result = await validateStandard(form.input, decoded.validation.value, { signal: request.signal, timeoutMs: form.validationTimeoutMs });
         if (result.issues === undefined) return { ok: true as const, value: result.value };
         const issues = standardIssuesToInputIssues(result.issues).map((issue) => {
           const field = issue.field;
-          if (field !== null && Object.hasOwn(form.fields, field)) return issue;
+          if (field !== null && resolveTransportField(transport, field) !== null) return issue;
           // Repeated wire values use one name even when a validator reports an element index.
           // Start at the deepest index: fixed outer indexes can be part of the declared wire name.
           for (let index = field?.lastIndexOf('[') ?? -1; index > 0; index = field!.lastIndexOf('[', index - 1)) {
             const array = field!.slice(0, index);
-            if (Object.hasOwn(form.fields, array) && form.fields[array]!.type === 'array') return { ...issue, field: array };
+            if (resolveTransportField(transport, array)?.cardinality === 'repeated') return { ...issue, field: array };
           }
           return { ...issue, field: null };
         });
