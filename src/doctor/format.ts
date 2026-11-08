@@ -16,7 +16,7 @@ function sarifResult(finding: Diagnostic, ruleIndex: number) {
     ruleId: finding.ruleId, ruleIndex,
     level: finding.severity === 'info' ? 'note' : finding.severity,
     kind: finding.outcome === 'defect' ? 'fail' : finding.outcome === 'inconclusive' ? 'review' : finding.outcome === 'no-finding' ? 'pass' : 'notApplicable',
-    message: { text: finding.note },
+    message: { text: finding.remediation === undefined ? finding.note : `${finding.note}\nFix: ${finding.remediation}` },
     ...(location === null ? {} : { locations: [{ physicalLocation: {
       artifactLocation: { uri: artifactUri(location.path) },
       region: { startLine: Math.max(1, location.line), startColumn: Math.max(1, location.column) },
@@ -25,6 +25,9 @@ function sarifResult(finding: Diagnostic, ruleIndex: number) {
     properties: {
       analysisStatus: finding.analysisStatus, certainty: finding.certainty, outcome: finding.outcome,
       scope: finding.scope, subcode: finding.subcode, comparativeValue: finding.comparativeValue,
+      ...(finding.schemaPath === undefined ? {} : { schemaPath: finding.schemaPath }),
+      ...(finding.reason === undefined ? {} : { reason: finding.reason }),
+      ...(finding.remediation === undefined ? {} : { remediation: finding.remediation }),
     },
   };
 }
@@ -62,6 +65,8 @@ export function formatDoctorReport(report: DoctorReport, format: DoctorOutputFor
     const source = finding.evidenceRef;
     const at = source === null ? '' : `${source.path}:${source.line}:${source.column} `;
     lines.push(`${at}${finding.severity.toUpperCase()} ${finding.ruleId} [${finding.analysisStatus}/${finding.certainty}] ${finding.note}`);
+    if (finding.schemaPath !== undefined) lines.push(`  Schema: ${finding.schemaPath}`);
+    if (finding.remediation !== undefined) lines.push(`  Fix: ${finding.remediation}`);
   }
   const incomplete = report.coverage.filter((row) => row.actualStatus !== 'checked').length;
   lines.push(`${report.findings.length} findings; ${incomplete} coverage rows remain unknown, unsupported, or not evaluated`);

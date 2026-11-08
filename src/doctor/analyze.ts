@@ -1,6 +1,8 @@
 import { makeCollector, type Collector } from './collector.ts';
 import { AnalysisBudget, type AnalysisLimits } from './budget.ts';
 import type { FormCheck } from '../contract/types.ts';
+import { RICH_FORM_CHECK_FORMAT, type RichFormCheck } from '../form/wire-manifest.ts';
+import { analyzeRichForm } from './rich-analyze.ts';
 import { sourceSha256 } from '../contract/behavior.ts';
 import {
   canImplicitlySubmit,
@@ -12,7 +14,7 @@ import {
 } from './html.ts';
 import type { CollectionResult, ControlFact, EffectiveTarget, FormFact, ParsedDocument, TargetResult } from './html.ts';
 import { DoctorConfigError, loadDoctorConfig, readConfiguredDocument, MAX_TOTAL_DOCUMENT_BYTES } from './config.ts';
-import type { DoctorBindingConfig, DoctorDocumentConfig, LoadedDoctorConfig } from './types.ts';
+import type { DoctorBindingConfig, DoctorDocumentConfig, DoctorProjection, LoadedDoctorConfig } from './types.ts';
 import type {
   Diagnostic,
   DoctorReport,
@@ -61,7 +63,7 @@ function actionPathMatches(actual: string, expected: string): boolean {
 
 function compareTarget(
   collector: Collector,
-  check: FormCheck,
+  check: Readonly<{ action: Pick<FormCheck['action'], 'id' | 'path' | 'method'> }>,
   target: { url: URL; method: string },
   documentPath: string,
   formId: string,
@@ -319,7 +321,7 @@ type BoundForm = Readonly<{
   snapshot: DocumentSnapshot;
   binding: DoctorBindingConfig;
   form: FormFact;
-  check: FormCheck;
+  check: DoctorProjection;
 }>;
 
 async function analyzeLoaded(loaded: LoadedDoctorConfig, limits: Partial<AnalysisLimits>): Promise<DoctorReport> {
@@ -499,6 +501,7 @@ function recordAnalysisLimit(state: AnalysisState, bound: BoundForm): void {
 function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: ControlFact | null, activation: string): boolean {
   const { collector, submissions } = state;
   const { snapshot: { document }, binding, form, check } = bound;
+  if (check.format === RICH_FORM_CHECK_FORMAT) return analyzeRichActivation(state, bound, check, submitter, activation);
   const location = submitter?.location ?? form.location;
   const resolved = resolveEffectiveTarget(form, submitter);
   const target = analyzeTarget(collector, bound, location, resolved);
@@ -509,7 +512,53 @@ function analyzeActivation(state: AnalysisState, bound: BoundForm, submitter: Co
   submissions.push(fact);
   if (target === null) return true;
   checkSupply(collector, check, form, collection, entriesByName, document.path, binding, location);
-  checkConstraints(collector, check, entriesByName, document.path, binding, target.skipValidation);
+  if (document.sourceKind === 'redacted-snapshot') collector.cover({ target: targetPath(document.path, binding), ruleGroup: 'constraints',
+    actualStatus: 'unknown', evidenceRef: form.location, note: 'captured values were redacted; value constraints are not evaluated' });
+  else checkConstraints(collector, check, entriesByName, document.path, binding, target.skipValidation);
+  return true;
+}
+
+/** Rich transport keeps the legacy binding, activation, provenance and budget lifecycle. */
+function analyzeRichActivation(state: AnalysisState, bound: BoundForm, check: RichFormCheck, submitter: ControlFact | null, activation: string): boolean {
+  const { collector } = state;
+  const { snapshot: { document, parsed, artifactHash }, binding, form } = bound;
+  const location = submitter?.location ?? form.location;
+  let resolved = resolveEffectiveTarget(form, submitter);
+  if (resolved.problem?.code === 'UNSUPPORTED_ENCODING' && resolved.target?.encoding === 'multipart/form-data' && check.action.encoding === 'multipart') {
+    resolved = { target: resolved.target, problem: null };
+  }
+  const target = analyzeTarget(collector, bound, location, resolved);
+  const expectedEncoding = check.action.encoding === 'multipart' ? 'multipart/form-data' : 'application/x-www-form-urlencoded';
+  if (resolved.target !== null && resolved.target.encoding !== expectedEncoding) collector.add({
+    ...diagnosticError('BC011', 'rich-wire-contract', `${check.action.id}/rich/encoding`, 'encoding-mismatch',
+      `Native form encoding ${resolved.target.encoding} does not match ${expectedEncoding}.`, location),
+    schemaPath: '/action/encoding', reason: 'Native transport encoding differs from the declared request boundary.',
+    remediation: `Render enctype="${expectedEncoding}" for this form and its submitter overrides.`,
+  });
+  const result = analyzeRichForm({ form, check, submitter, skipValidation: resolved.target?.skipValidation ?? false,
+    constraintSeverity: binding.constraintMismatchSeverity, redactedValues: document.sourceKind === 'redacted-snapshot',
+  });
+  const fact: SubmissionFact = {
+    artifact: { path: document.path, sha256: artifactHash, sourceKind: document.sourceKind },
+    intendedAction: check.action, projectionSource: check.source, formId: binding.formId, formLocation: form.location,
+    context: { documentUrl: document.documentUrl, baseUrl: parsed.baseUrl, executionAssumption: document.executionAssumption, hasScript: parsed.hasScript },
+    activation, submitterLocation: submitter?.location ?? null,
+    rawAction: attribute(form.element, 'action'), rawSubmitterAction: submitter ? attribute(submitter.element, 'formaction') : null,
+    effectiveTarget: resolved.target ? { url: resolved.target.url.href, method: resolved.target.method, encoding: resolved.target.encoding, skipValidation: resolved.target.skipValidation } : null,
+    fields: [...result.collection.fields].map(([name, field]) => ({ name, possibleCount: field.maximum,
+      minimumCount: field.minimum, maximumCount: field.maximum, locations: field.locations,
+    })),
+  };
+  if (!state.budget.acceptSubmission(fact)) return false;
+  state.submissions.push(fact);
+  if (target === null) return true;
+  for (const finding of result.findings) collector.add(finding);
+  for (const [ruleGroup, actualStatus] of [['supply', result.supplyStatus], ['cardinality', result.cardinalityStatus], ['constraints', result.constraintsStatus]] as const) {
+    collector.cover({ target: targetPath(document.path, binding), ruleGroup, actualStatus, evidenceRef: form.location,
+      note: ruleGroup === 'constraints' ? 'declared wire choices and bounded integer witnesses only; external refinements, transforms, output behavior and redacted values remain unknown' :
+        'declared rich wire structure compared with native count intervals; future dynamic states are not enumerated',
+    });
+  }
   return true;
 }
 

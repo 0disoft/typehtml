@@ -2,6 +2,7 @@ import { generateContractArtifacts, generateSchemaType } from './contract/genera
 import { loadBoundaryContract } from './contract/load.ts';
 import { readStrictJson } from './contract/strict-json.ts';
 import { FORM_FORMAT, loadForm, projectForm } from './form/index.ts';
+import { WIRE_FORM_FORMAT, loadWireForm, projectWireForm } from './form/wire-manifest.ts';
 
 export interface ArtifactBundle {
   readonly sourceSha256: string;
@@ -13,6 +14,16 @@ const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 /** Static data artifacts only. Neither manifest format imports application code. */
 export async function createArtifactBundle(sourcePath: string, sourceLabel: string): Promise<ArtifactBundle> {
   const value = await readStrictJson(sourcePath, { integerOnly: true });
+  if (value !== null && typeof value === 'object' && !Array.isArray(value) && value.format === WIRE_FORM_FORMAT) {
+    const loaded = await loadWireForm(sourcePath);
+    const projection = projectWireForm(loaded.form, { sourcePath: sourceLabel, sourceSha256: loaded.sourceSha256 });
+    const header = `// GENERATED from ${sourceLabel}; do not edit.\n// Source SHA256: ${loaded.sourceSha256}\n`;
+    const definition = `${header}import { defineWireForm } from '@0disoft/typehtml';\n\n// Static transport data only. Bind real input/output validators with defineSchemaForm.\nexport const wireForm = defineWireForm(${JSON.stringify(loaded.form.definition, null, 2)} as const);\n`;
+    return { sourceSha256: loaded.sourceSha256, files: new Map([
+      ['form-definition.ts', definition], ['form-check.generated.json', json(projection)],
+      ['contract-digests.generated.json', json({ format: 'typehtml-wire-form-digests/1', sourceSha256: loaded.sourceSha256, behaviorSha256: loaded.form.behaviorSha256 })],
+    ]) };
+  }
   if (value !== null && typeof value === 'object' && !Array.isArray(value) && value.format === FORM_FORMAT) {
     const loaded = await loadForm(sourcePath);
     const projection = projectForm(loaded.form, { sourcePath: sourceLabel, sourceSha256: loaded.sourceSha256 });

@@ -210,3 +210,71 @@ before later fields are rendered. Presence labels distinguish declared required
 keys, arrays that need values because of `minItems`, and absent optional arrays
 or checkboxes that decode to `[]` or `false`. The JSON `required` flag records the
 declaration; it is not a complete summary of every value constraint.
+
+## Check rich native transport contracts
+
+`schemaFormWireManifest(form)` exports the explicit wire data from a
+`defineSchemaForm` result. It preserves nested names, booleans, repeated arrays,
+bounded collections, upload slots and multipart limits. It does not inspect or
+execute Standard Schema validators, infer their output, or require a fabricated
+public output schema. Existing `schemaFormManifest(form, { output })` and
+`getSchemaFormProfile` retain their original scalar-only contract.
+
+```ts
+import { writeFile } from 'node:fs/promises';
+import { schemaFormWireManifest } from '@0disoft/typehtml';
+import { profileForm } from './profile-form.js';
+
+await writeFile('profile.wire.json', JSON.stringify(
+  schemaFormWireManifest(profileForm), null, 2,
+));
+```
+
+```sh
+typehtml generate --form profile.wire.json --out-dir generated --root .
+typehtml doctor --config doctor.config.json --format text
+```
+
+The source format is `typehtml-wire-form/1`; the generated projection is
+`typehtml-form-check/1`. A Doctor input still uses
+`{ "kind": "form-projection", "path": "generated/form-check.generated.json" }`.
+Rich and legacy projections can coexist in one config. The generator reads only
+JSON data and emits a static `wireForm`, a projection, and source/behavior
+digests. Bind actual runtime input/output validators in application code with
+`defineSchemaForm`; generated transport data is not a request handler. Source
+bytes, behavior digest, and all regenerated normalized fields must match before
+Doctor connects a rich projection to HTML. `--check` detects stale generation.
+
+Rich analysis checks exact canonical names, scalar duplicates versus allowed
+repeats, array presence/count bounds, active collection members, contiguous row
+indexes, and conflicting row keys where native values are known. Collection
+members are required only in rows that can actually submit; declared future rows
+are not invented. It also checks upload control kind, single/multiple structure,
+declared native encoding, finite native option/checkbox tokens, and supported
+integer boundary witnesses. Diagnostic JSON, SARIF and LSP include `schemaPath`,
+`reason` and `remediation` for rich findings. Text/editor messages show the fix.
+
+Counts are represented by minimum/maximum intervals per wire name, not by
+enumerating every combination of checkbox states. One thousand independent
+checkboxes produce one native activation and one count interval for their name.
+Each successful file input contributes at least one multipart part, including an
+empty file placeholder. Guaranteed entry/part counts exceeding `maxEntries` or
+`maxParts` are defects; possible choice-dependent overflow remains unknown.
+The existing path, control-visit and evidence-byte budgets still stop incomplete
+analysis with exit 3. A confirmed defect retains exit 1 even if later work is
+incomplete; configuration/execution errors retain exit 2.
+
+Runtime refinements, transforms, output validation, authorization, effects,
+actual selected file content/MIME/bytes and future JavaScript mutations are not
+static proof. Rich `constraints` coverage therefore remains `unknown`, including
+when a bounded witness is found. Native `accept` is a hint, never a security
+guarantee. Selected file counts and optional choices can also leave cardinality
+unknown; applications still enforce their runtime limits. Requiring unknown
+rule groups in a release audit yields exit 3 instead of a success claim.
+
+A `redacted-snapshot` is analyzed structurally: literal tokens, integer/value
+constraints and row-key equality are skipped, and value-dependent select supply
+remains unknown. Redacted placeholder values are never reported as real invalid
+tokens or duplicate identities. Use explicit rendered-state capture for important
+framework states; Doctor does not parse JSX/Astro/Svelte source as a new template
+language or analyze arbitrary application data flow.

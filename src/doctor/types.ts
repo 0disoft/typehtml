@@ -1,4 +1,7 @@
 import type { FormCheck } from '../contract/types.ts';
+import type { RichFormCheck } from '../form/wire-manifest.ts';
+
+export type DoctorProjection = FormCheck | RichFormCheck;
 
 export type DiagnosticOutcome = 'defect' | 'no-finding' | 'inconclusive' | 'not-applicable';
 export type AnalysisStatus = 'checked' | 'unknown' | 'unsupported' | 'not-evaluated';
@@ -33,12 +36,15 @@ export interface Diagnostic {
   };
   readonly note: string;
   readonly subcode?: string;
+  readonly schemaPath?: string;
+  readonly reason?: string;
+  readonly remediation?: string;
   readonly witness?: {
     readonly rawValue: string;
     readonly codecValue: string | number;
     readonly codec: 'decimal-integer';
     readonly schemaPointer: string;
-    readonly source: FormCheck['source'];
+    readonly source: DoctorProjection['source'];
     readonly synthetic: true;
     readonly nativeValidation: 'enabled-for-selected-activation';
     readonly hypotheticalServerMinimum?: number;
@@ -59,8 +65,8 @@ export interface CoverageRow {
 
 export interface SubmissionFact {
   readonly artifact: { readonly path: string; readonly sha256: string; readonly sourceKind: string };
-  readonly intendedAction: FormCheck['action'];
-  readonly projectionSource: FormCheck['source'];
+  readonly intendedAction: DoctorProjection['action'];
+  readonly projectionSource: DoctorProjection['source'];
   readonly formId: string;
   readonly formLocation: SourceLocation;
   readonly context: { readonly documentUrl: string; readonly baseUrl: string; readonly executionAssumption: string; readonly hasScript: boolean };
@@ -69,7 +75,9 @@ export interface SubmissionFact {
   readonly rawAction: string | null;
   readonly rawSubmitterAction: string | null;
   readonly effectiveTarget: { readonly url: string; readonly method: string; readonly encoding: string; readonly skipValidation: boolean } | null;
-  readonly fields: readonly { readonly name: string; readonly possibleCount: number; readonly locations: readonly SourceLocation[] }[];
+  readonly fields: readonly { readonly name: string; readonly possibleCount: number | null;
+    readonly minimumCount?: number; readonly maximumCount?: number | null;
+    readonly locations: readonly SourceLocation[] }[];
 }
 
 export interface DoctorReport {
@@ -128,7 +136,7 @@ export interface LoadedDoctorConfig {
   readonly config: DoctorConfig;
   readonly configPath: string;
   readonly baseDir: string;
-  readonly formChecks: ReadonlyMap<string, FormCheck>;
+  readonly formChecks: ReadonlyMap<string, DoctorProjection>;
   readonly sourceIssues: ReadonlyMap<string, string>;
 }
 

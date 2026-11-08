@@ -38,8 +38,12 @@ export async function runDoctorLanguageServer(configPath: string, input: AsyncIt
       const character = Math.max(0, (at?.column ?? 1) - 1);
       list.push({ range: { start: { line, character }, end: { line, character: character + 1 } },
         severity: finding.severity === 'error' ? 1 : finding.severity === 'warning' ? 2 : 3,
-        code: finding.ruleId, source: 'TypeHTML', message: `[${finding.analysisStatus}] ${finding.note}`,
-        data: { analysisStatus: finding.analysisStatus, certainty: finding.certainty, applicationCompleteness: 'not-evaluated' } });
+        code: finding.ruleId, source: 'TypeHTML', message: `[${finding.analysisStatus}] ${finding.note}${finding.remediation === undefined ? '' : `\nFix: ${finding.remediation}`}`,
+        data: { analysisStatus: finding.analysisStatus, certainty: finding.certainty, applicationCompleteness: 'not-evaluated',
+          ...(finding.schemaPath === undefined ? {} : { schemaPath: finding.schemaPath }),
+          ...(finding.reason === undefined ? {} : { reason: finding.reason }),
+          ...(finding.remediation === undefined ? {} : { remediation: finding.remediation }),
+        } });
       byUri.set(uri, list);
     }
     if (report.error || report.analysisTruncated || report.findingsTruncated) {

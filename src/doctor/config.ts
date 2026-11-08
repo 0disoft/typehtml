@@ -4,8 +4,8 @@ import { readStrictJson } from '../contract/strict-json.ts';
 import { loadBoundaryContract, loadFormCheck } from '../contract/load.ts';
 import { verifyFormCheckSource } from '../contract/project.ts';
 import { FORM_FORMAT, loadForm, verifyFormSource } from '../form/index.ts';
+import { RICH_FORM_CHECK_FORMAT, loadRichFormCheck, loadWireForm, verifyWireFormSource } from '../form/wire-manifest.ts';
 import type { JsonObject, JsonValue } from '../contract/strict-json.ts';
-import type { FormCheck } from '../contract/types.ts';
 import type {
   DoctorBindingConfig,
   DoctorConfig,
@@ -13,6 +13,7 @@ import type {
   DoctorInputConfig,
   LoadedDoctorConfig,
   CoverageRow,
+  DoctorProjection,
 } from './types.ts';
 
 export const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
@@ -143,7 +144,7 @@ function parseAudit(value: JsonValue | undefined): Pick<DoctorConfig, 'releaseRe
   };
 }
 
-async function readProjection(baseDir: string, realBaseDir: string, input: DoctorInputConfig): Promise<FormCheck> {
+async function readProjection(baseDir: string, realBaseDir: string, input: DoctorInputConfig): Promise<DoctorProjection> {
   const lexicalPath = withinRoot(baseDir, resolve(baseDir, input.path));
   let path: string;
   try {
@@ -154,18 +155,24 @@ async function readProjection(baseDir: string, realBaseDir: string, input: Docto
   withinRoot(realBaseDir, path);
   if ((await stat(path)).size > MAX_DOCUMENT_BYTES) throw new DoctorConfigError('CONFIG_INPUT_TOO_LARGE', 'form projection exceeds the file size limit');
   try {
+    const value = await readStrictJson(path, { integerOnly: true });
+    if (value !== null && typeof value === 'object' && !Array.isArray(value) && value.format === RICH_FORM_CHECK_FORMAT) return (await loadRichFormCheck(path)).formCheck;
     return (await loadFormCheck(path)).formCheck;
   } catch (error) {
     throw new DoctorConfigError('CONFIG_FORM_CHECK', error instanceof Error ? error.message : 'cannot load form projection');
   }
 }
 
-async function sourceIssue(baseDir: string, realBaseDir: string, check: FormCheck): Promise<string | null> {
+async function sourceIssue(baseDir: string, realBaseDir: string, check: DoctorProjection): Promise<string | null> {
   try {
     const sourcePath = withinRoot(baseDir, resolve(baseDir, check.source.path));
     const realSourcePath = await realpath(sourcePath);
     withinRoot(realBaseDir, realSourcePath);
     if ((await stat(realSourcePath)).size > MAX_DOCUMENT_BYTES) throw new Error('authoritative source exceeds the file size limit');
+    if (check.format === RICH_FORM_CHECK_FORMAT) {
+      verifyWireFormSource(check, await loadWireForm(realSourcePath));
+      return null;
+    }
     const source = await readStrictJson(realSourcePath, { integerOnly: true });
     if (source !== null && typeof source === 'object' && !Array.isArray(source) && source.format === FORM_FORMAT) {
       verifyFormSource(check, await loadForm(realSourcePath));
@@ -180,7 +187,7 @@ async function sourceIssue(baseDir: string, realBaseDir: string, check: FormChec
 }
 
 async function loadProjections(baseDir: string, inputs: readonly DoctorInputConfig[]) {
-  const formChecks = new Map<string, FormCheck>();
+  const formChecks = new Map<string, DoctorProjection>();
   const sourceIssues = new Map<string, string>();
   let realBaseDir: string;
   try {

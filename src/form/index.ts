@@ -1,5 +1,6 @@
 export * from './definition.ts';
 export * from './manifest.ts';
+export * from './wire-manifest.ts';
 export * from './handler.ts';
 export { escapeHtml } from './html.ts';
 export * from './attributes.ts';
