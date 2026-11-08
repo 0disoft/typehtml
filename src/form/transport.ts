@@ -139,13 +139,13 @@ function freezeTree(value: unknown): void {
 }
 
 /** Decode only activated rows, preserving scalar codec errors and ordered repeated values. */
-export function decodeFormTransport(prepared: PreparedFormTransport, entries: readonly FormEntry[]): Readonly<{ raw: RawFormValues; validation: BoundaryValidation<Readonly<Record<string, unknown>>> }> {
-  if (Object.keys(prepared.collections).length === 0) return decodeFormFields(prepared.declarations, entries);
+export function decodeFormTransport(prepared: PreparedFormTransport, entries: readonly FormEntry[], options: Readonly<{ deferSparseCheck?: boolean }> = {}): Readonly<{ raw: RawFormValues; validation: BoundaryValidation<Readonly<Record<string, unknown>>> }> {
+  if (Object.keys(prepared.collections).length === 0) return decodeFormFields(prepared.declarations, entries, options);
   const active = getActiveTransportRows(prepared, entries.map(({ key }) => key));
   const indexes = Object.fromEntries(Object.entries(active).map(([name, values]) => [name, new Set(values)]));
   const selected: Record<string, FormField> = Object.create(null);
   for (const field of prepared.fields) if (field.row === undefined || indexes[field.row.collection]!.has(field.row.index)) selected[field.name] = field.declaration;
-  const decoded = decodeFormFields(selected, entries);
+  const decoded = decodeFormFields(selected, entries, options);
   const issues = collectionIssues(prepared.collections, active, decoded.raw);
   if (!decoded.validation.ok) {
     const sparse = decoded.validation.issues.some((issue) => issue.code === 'SPARSE_ARRAY');

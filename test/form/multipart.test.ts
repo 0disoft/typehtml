@@ -251,6 +251,29 @@ const uploadParts: readonly Part[] = [{ name: '_bc_csrf', value: 'token' }, { na
 const uploadRequest = (parts = uploadParts, signal?: AbortSignal, headers: Record<string, string> = {}) => request(body(parts), { signal, headers: { origin: 'https://app.test', ...headers } });
 
 describe('multipart schema form request lifetime', () => {
+  test('checks fixed array holes after text and file slots are merged, while rejecting real gaps', async () => {
+    await withStore(async (store, directory) => {
+      let executed = 0;
+      for (const index of [1, 2]) {
+        const form = defineSchemaForm({ id: `upload.rows${index}`, path: '/upload',
+          fields: { [`rows[${index}].caption`]: { type: 'string', required: true } },
+          uploads: { 'rows[0].file': { required: true } }, multipart: {},
+          input: z.object({ rows: z.array(z.object({ caption: z.string().optional(), file: z.custom<UploadedFile>((value) => (value as UploadedFile)?.kind === 'typehtml-upload/1').optional() })) }), output: z.string(),
+        });
+        const handle = createSchemaFormHandler(form, { uploadStore: store, allowedOrigins: ['https://app.test'],
+          authenticate: () => ({}), csrfToken: () => 'token', authorize: () => true,
+          execute: async ({ input }) => { executed++; expect(input.rows).toHaveLength(2); expect(input.rows[1]!.caption).toBe('second'); expect(await new Response(input.rows[0]!.file!.stream()).text()).toBe('file bytes'); return 'saved'; },
+          project: (value) => value, success: () => ({ location: '/done' }),
+        });
+        const response = await handle(uploadRequest([{ name: '_bc_csrf', value: 'token' },
+          { name: `rows[${index}].caption`, value: 'second' }, { name: 'rows[0].file', filename: 'a.txt', value: 'file bytes' }]));
+        expect(response.status).toBe(index === 1 ? 303 : 422);
+        expect(await readdir(directory)).toEqual([]);
+      }
+      expect(executed).toBe(1);
+    });
+  });
+
   test('file-only form validates real capabilities, executes once, redirects and releases storage', async () => {
     await withStore(async (store, directory) => {
       const calls: string[] = []; let saved: UploadedFile | undefined;

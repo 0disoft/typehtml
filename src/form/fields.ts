@@ -150,7 +150,10 @@ function hasHoles(value: unknown): boolean {
 }
 
 /** O(entries + declared fields + bounded path depth), preserving repeated-value order. */
-export function decodeFormFields(fields: FormFields, entries: readonly FormEntry[]): Readonly<{
+export function decodeFormFields(fields: FormFields, entries: readonly FormEntry[], options: Readonly<{
+  /** Internal multipart assembly checks holes after declared file slots have been attached. */
+  deferSparseCheck?: boolean;
+}> = {}): Readonly<{
   raw: RawFormValues; validation: BoundaryValidation<Readonly<Record<string, unknown>>>;
 }> {
   const grouped = new Map<string, string[]>();
@@ -182,7 +185,7 @@ export function decodeFormFields(fields: FormFields, entries: readonly FormEntry
       assign(value, fieldPath(name), decoded);
     } else assign(value, fieldPath(name), decoded[0] ?? false);
   }
-  if (hasHoles(value)) issues.push({ field: null, code: 'SPARSE_ARRAY', message: 'Indexed form values must be contiguous from zero' });
+  if (options.deferSparseCheck !== true && hasHoles(value)) issues.push({ field: null, code: 'SPARSE_ARRAY', message: 'Indexed form values must be contiguous from zero' });
   freezeTree(value);
   return Object.freeze({ raw: Object.freeze(raw), validation: issues.length > 0 || unknownKeys.length > 0
     ? { ok: false, issues: Object.freeze(issues), unknownKeys: Object.freeze(unknownKeys) }

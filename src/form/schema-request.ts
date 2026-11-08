@@ -29,7 +29,9 @@ export async function validateSchemaEntries<Form extends DefinedSchemaForm>(form
   files: ReadonlyMap<string, readonly UploadedFile[]> = new Map(),
 ): Promise<BoundaryValidation<InferStandardOutput<Form['input']>>> {
   const transport = getPreparedFormTransport(form.fields, form.collections);
-  const decoded = decodeFormTransport(transport, entries);
+  // Fixed indexed text and file slots may fill different rows of one dense array.
+  // Check actual holes only after both declared domains have been assembled.
+  const decoded = decodeFormTransport(transport, entries, { deferSparseCheck: Object.keys(form.uploads).length > 0 });
   const uploads = decodeUploadFields(form.uploads, files);
   if (!decoded.validation.ok || uploads.issues.length > 0) return {
     ok: false, issues: Object.freeze([...(decoded.validation.ok ? [] : decoded.validation.issues), ...uploads.issues]),
