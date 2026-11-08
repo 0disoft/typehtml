@@ -21,15 +21,33 @@ describe('TypeHTML CLI', () => {
     expect(help.stdout).toContain('typehtml init <directory>');
     expect(help.stdout).toContain('--form <file>');
     expect(help.stdout).toContain('--package-source <local.tgz>');
+    expect(help.stdout).toContain('--runtime bun|node');
     expect(help.stdout).toContain('does not install dependencies');
   });
 
   it('rejects duplicate or unsupported options with one JSON error report', () => {
-    for (const args of [[], ['init'], ['init', 'app', '--package-manager', 'yarn'], ['init', 'a', 'b'], ['init', 'app', '--package-source'], ['init', 'app', '--package-source', '--package-manager', 'npm'], ['init', 'app', '--package-source', 'a.tgz', '--package-source', 'b.tgz'], ['generate', '--form', 'a', '--contract', 'b', '--out-dir', 'out']]) {
+    for (const args of [[], ['init'], ['init', 'app', '--package-manager', 'yarn'], ['init', 'a', 'b'], ['init', 'app', '--runtime'], ['init', 'app', '--runtime', 'deno'], ['init', 'app', '--runtime', 'node', '--runtime', 'bun'], ['init', 'app', '--package-source'], ['init', 'app', '--package-source', '--package-manager', 'npm'], ['init', 'app', '--package-source', 'a.tgz', '--package-source', 'b.tgz'], ['generate', '--form', 'a', '--contract', 'b', '--out-dir', 'out']]) {
       const result = cli(...args);
       expect(result.exitCode).toBe(2);
       expect(JSON.parse(result.stdout).status).toBe('configuration-error');
       expect(result.stderr).toBe('');
+    }
+  });
+
+  it('creates a Node starter with Bun as the independently selected package manager', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'typehtml-cli-node-'));
+    try {
+      const directory = join(parent, 'node app');
+      const result = cli('init', directory, '--runtime', 'node', '--package-manager', 'bun');
+      expect(result.exitCode).toBe(0);
+      const report = JSON.parse(result.stdout);
+      expect(report.runtime).toBe('Node.js >=22.0.0');
+      expect(report.packageManager).toBe('bun');
+      const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
+      expect(manifest.scripts.build).toBe('bun run generate && tsc');
+      expect(manifest.scripts.dev).toBe('bun run build && node build/server.js');
+    } finally {
+      await rm(parent, { recursive: true, force: true });
     }
   });
 

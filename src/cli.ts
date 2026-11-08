@@ -6,7 +6,7 @@ import { formatDoctorReport, type DoctorOutputFormat } from './doctor/format.ts'
 const HELP = `TypeHTML ${VERSION}
 
 Usage:
-  typehtml init <directory> [--package-manager bun|npm] [--package-source <local.tgz>]
+  typehtml init <directory> [--runtime bun|node] [--package-manager bun|npm] [--package-source <local.tgz>]
   typehtml doctor --config <file> [--format json|text|sarif] [--watch]
   typehtml capture --config <file> --out-dir <new-directory>
   typehtml catalog --config <file> --out-dir <new-directory>
@@ -21,7 +21,7 @@ init writes files only; it does not install dependencies or start a server.
 `;
 
 function usage(): never {
-  const report = configErrorReport('<cli>', 'usage: typehtml init <directory> [--package-manager bun|npm] [--package-source <local.tgz>] | typehtml doctor --config <file> | typehtml generate --form <file> --out-dir <directory> [--root <directory>] [--check]');
+  const report = configErrorReport('<cli>', 'usage: typehtml init <directory> [--runtime bun|node] [--package-manager bun|npm] [--package-source <local.tgz>] | typehtml doctor --config <file> | typehtml generate --form <file> --out-dir <directory> [--root <directory>] [--check]');
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   process.exit(2);
 }
@@ -93,11 +93,19 @@ async function main(): Promise<void> {
   if (args[0] === 'init') {
     let directory: string | undefined;
     let packageManager: 'bun' | 'npm' = 'bun';
+    let runtime: 'bun' | 'node' = 'bun';
     let packageSource: string | undefined;
     let selectedManager = false;
+    let selectedRuntime = false;
     for (let index = 1; index < args.length; index++) {
       const argument = args[index]!;
-      if (argument === '--package-manager') {
+      if (argument === '--runtime') {
+        if (selectedRuntime) usage();
+        selectedRuntime = true;
+        const value = args[++index];
+        if (value !== 'bun' && value !== 'node') usage();
+        runtime = value;
+      } else if (argument === '--package-manager') {
         if (selectedManager) usage();
         selectedManager = true;
         const value = args[++index];
@@ -117,7 +125,7 @@ async function main(): Promise<void> {
     if (directory === undefined || directory === '') usage();
     try {
       const { initProject } = await import('./init.ts');
-      process.stdout.write(`${JSON.stringify(await initProject({ directory, packageManager, packageSource }), null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(await initProject({ directory, packageManager, packageSource, runtime }), null, 2)}\n`);
     } catch (error) {
       process.stdout.write(`${JSON.stringify({ format: 'typehtml-init/1', status: 'error', message: error instanceof Error ? error.message : 'starter creation failed' })}\n`);
       process.exitCode = 2;

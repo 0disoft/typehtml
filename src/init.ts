@@ -3,13 +3,14 @@ import { basename, dirname, resolve } from 'node:path';
 import { VERSION } from './version.ts';
 
 export type PackageManager = 'bun' | 'npm';
-export type InitOptions = Readonly<{ directory: string; packageManager?: PackageManager; packageSource?: string }>;
+export type StarterRuntime = 'bun' | 'node';
+export type InitOptions = Readonly<{ directory: string; packageManager?: PackageManager; packageSource?: string; runtime?: StarterRuntime }>;
 export type InitResult = Readonly<{
   format: 'typehtml-init/1';
   status: 'created';
   directory: string;
   files: readonly string[];
-  runtime: 'Bun >=1.4.0';
+  runtime: 'Bun >=1.4.0' | 'Node.js >=22.0.0';
   packageManager: PackageManager;
   nextCommands: readonly (readonly string[])[];
 }>;
@@ -24,6 +25,8 @@ export async function initProject(options: InitOptions): Promise<InitResult> {
   if (directory === parent) throw new Error('the filesystem root cannot be a starter directory');
   const packageManager = options.packageManager ?? 'bun';
   if (packageManager !== 'bun' && packageManager !== 'npm') throw new Error('package manager must be bun or npm');
+  const runtime = options.runtime ?? 'bun';
+  if (runtime !== 'bun' && runtime !== 'node') throw new Error('runtime must be bun or node');
   let existed = false;
   try {
     const info = await lstat(directory);
@@ -35,7 +38,7 @@ export async function initProject(options: InitOptions): Promise<InitResult> {
   }
   const archive = options.packageSource === undefined ? undefined : await readPackageSource(options.packageSource);
   const files: Readonly<Record<string, string | Uint8Array>> = {
-    ...starterFiles(directory, packageManager, archive !== undefined),
+    ...starterFiles(directory, packageManager, runtime, archive !== undefined),
     ...(archive === undefined ? {} : { [VENDORED_PACKAGE]: archive }),
   };
   await mkdir(parent, { recursive: true });
@@ -65,8 +68,8 @@ export async function initProject(options: InitOptions): Promise<InitResult> {
   }
   return {
     format: 'typehtml-init/1', status: 'created', directory, files: Object.keys(files),
-    runtime: 'Bun >=1.4.0', packageManager,
-    nextCommands: [[packageManager, 'install'], [packageManager, 'run', 'generate'], [packageManager, 'run', 'doctor'], [packageManager, 'run', 'dev']],
+    runtime: runtime === 'bun' ? 'Bun >=1.4.0' : 'Node.js >=22.0.0', packageManager,
+    nextCommands: [[packageManager, 'install'], [packageManager, 'run', 'generate'], [packageManager, 'run', 'check'], [packageManager, 'run', 'dev']],
   };
 }
 
@@ -100,14 +103,31 @@ async function readPackageSource(source: string): Promise<Uint8Array> {
   }
 }
 
-function starterFiles(directory: string, packageManager: PackageManager, vendored = false): Readonly<Record<string, string>> {
+function starterFiles(directory: string, packageManager: PackageManager, runtime: StarterRuntime, vendored = false): Readonly<Record<string, string>> {
   const name = basename(directory).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '') || 'typehtml-app';
   const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
   const generate = 'typehtml generate --form form.json --out-dir generated --root .';
+  const run = `${packageManager} run`;
+  const scripts = {
+    dev: runtime === 'bun' ? 'bun run generate && bun server.ts' : `${run} build && node build/server.js`,
+    start: runtime === 'bun' ? 'bun run generate && bun server.ts' : `${run} build && node build/server.js`,
+    ...(runtime === 'node' ? { build: `${run} generate && tsc` } : {}),
+    generate, 'generate:check': `${generate} --check`, typecheck: 'tsc --noEmit',
+    doctor: 'typehtml doctor --config doctor.config.json',
+    check: `${run} generate:check && ${run} typecheck && ${run} doctor`,
+  };
   return {
-    'package.json': json({ name, version: '0.0.0', private: true, type: 'module', engines: { bun: '>=1.4.0' }, scripts: {
-      dev: 'bun run generate && bun server.ts', start: 'bun run generate && bun server.ts', generate, 'generate:check': `${generate} --check`, doctor: 'typehtml doctor --config doctor.config.json',
-    }, dependencies: { '@0disoft/typehtml': vendored ? `file:./${VENDORED_PACKAGE}` : `^${VERSION}` } }),
+    'package.json': json({ name, version: '0.0.0', private: true, type: 'module',
+      engines: runtime === 'bun' ? { bun: '>=1.4.0' } : { node: '>=22.0.0' }, scripts,
+      dependencies: { '@0disoft/typehtml': vendored ? `file:./${VENDORED_PACKAGE}` : `^${VERSION}` },
+      devDependencies: { typescript: '^7', ...(runtime === 'bun' ? { '@types/bun': '^1' } : { '@types/node': '^22' }) },
+    }),
+    'tsconfig.json': json({ compilerOptions: {
+      target: 'ES2022', module: runtime === 'bun' ? 'ESNext' : 'NodeNext',
+      moduleResolution: runtime === 'bun' ? 'bundler' : 'NodeNext',
+      lib: ['ES2022', 'DOM', 'DOM.Iterable'], types: [runtime === 'bun' ? 'bun' : 'node'], strict: true, skipLibCheck: true,
+      ...(runtime === 'bun' ? { noEmit: true, allowImportingTsExtensions: true } : { outDir: 'build', rootDir: '.', rewriteRelativeImportExtensions: true }),
+    }, include: ['server.ts', 'app.ts', 'generated/**/*.ts'] }),
     'form.json': json({ format: 'typehtml-form/1', id: 'greeting.create', path: '/greet', input: {
       type: 'object', additionalProperties: false, required: ['name', 'quantity'], properties: {
         name: { type: 'string', minLength: 1, maxLength: 80 }, quantity: { type: 'integer', minimum: 1, maximum: 20 },
@@ -119,9 +139,10 @@ function starterFiles(directory: string, packageManager: PackageManager, vendore
       }],
     }] }),
     'index.html': INDEX_HTML,
-    'server.ts': SERVER_TS,
-    '.gitignore': 'node_modules/\n.env\n.env.*\n.DS_Store\n',
-    'README.md': `# ${name}\n\nA native HTML form using TypeHTML. Bun 1.4+ runs the server; ${packageManager} installs dependencies and runs the scripts.\n\n\`\`\`sh\n${packageManager} install\n${packageManager} run generate\n${packageManager} run doctor\n${packageManager} run dev\n\`\`\`\n\nOpen http://127.0.0.1:3000/. Set PORT and ALLOWED_ORIGIN together when changing the local address.\n\nEdit form.json as the single source of input/output constraints. Run generate after schema changes, and generate:check to detect stale artifacts. Doctor compares index.html with the generated form projection; it does not test authentication or database behavior.\n\nThe local example uses anonymous in-memory sessions and synchronizer CSRF tokens. It has no user accounts, persistent storage, transaction coordinator, or idempotency protection. Connect real application ports before handling durable writes. The server binds to 127.0.0.1.\n`,
+    'app.ts': APP_TS,
+    'server.ts': runtime === 'bun' ? BUN_SERVER_TS : NODE_SERVER_TS,
+    '.gitignore': 'node_modules/\nbuild/\n.env\n.env.*\n.DS_Store\n',
+    'README.md': `# ${name}\n\nA native HTML form using TypeHTML. ${runtime === 'bun' ? 'Bun 1.4+' : 'Node.js 22+'} runs the server; ${packageManager} installs dependencies and runs the scripts.\n\n\`\`\`sh\n${packageManager} install\n${packageManager} run generate\n${packageManager} run check\n${packageManager} run dev\n\`\`\`\n\nOpen http://127.0.0.1:3000/. Set PORT and ALLOWED_ORIGIN together when changing the local address.\n\nEdit form.json as the single source of input/output constraints. Run generate after schema changes. The check command verifies generated artifacts, TypeScript, and the HTML contract. Doctor compares index.html with the generated form projection; it does not test authentication or database behavior.\n\n${runtime === 'node' ? 'The build command compiles TypeScript to ESM JavaScript in build/. The Node server runs this JavaScript and does not require native TypeScript stripping.\n\n' : ''}The local example uses anonymous in-memory sessions and synchronizer CSRF tokens. It has no user accounts, persistent storage, transaction coordinator, or idempotency protection. Connect real application ports before handling durable writes. The server binds to 127.0.0.1.\n`,
   };
 }
 
@@ -140,14 +161,14 @@ const INDEX_HTML = `<!doctype html>
 </form></main></body></html>
 `;
 
-const SERVER_TS = `import { readFile } from 'node:fs/promises';
-import { createFormHandler } from '@0disoft/typehtml';
+const APP_TS = `import { createFormHandler } from '@0disoft/typehtml';
 import { form } from './generated/form-definition.ts';
 
-const template = await readFile(new URL('./index.html', import.meta.url), 'utf8');
-const port = Number(process.env.PORT ?? 3000);
+export const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT');
-const origin = process.env.ALLOWED_ORIGIN ?? 'http://127.0.0.1:' + port;
+export const origin = process.env.ALLOWED_ORIGIN ?? 'http://127.0.0.1:' + port;
+
+export function createApp(template: string): (request: Request) => Promise<Response> {
 type Session = { id: string; csrfToken: string; expiresAt: number };
 const sessions = new Map<string, Session>();
 
@@ -189,7 +210,7 @@ const submit = createFormHandler(form, {
   invalid: ({ rawValues, issues, csrfToken }) => render(csrfToken, rawValues, issues),
 });
 
-const server = Bun.serve({ hostname: '127.0.0.1', port, async fetch(request) {
+return async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
   if (request.method === 'GET' && url.pathname === '/') {
     let session = sessionFor(request);
@@ -210,9 +231,30 @@ const server = Bun.serve({ hostname: '127.0.0.1', port, async fetch(request) {
     return html('<!doctype html><html lang="en"><meta charset="utf-8"><title>Greeting sent</title><main><h1>' + escape(message) + '</h1><a href="/">Start again</a></main></html>');
   }
   return html('<h1>Not found</h1>', 404);
-} });
+};
+}
+`;
+
+const BUN_SERVER_TS = `import { readFile } from 'node:fs/promises';
+import { createApp, port, origin } from './app.ts';
+
+const template = await readFile(new URL('./index.html', import.meta.url), 'utf8');
+const server = Bun.serve({ hostname: '127.0.0.1', port, fetch: createApp(template) });
 console.log('TypeHTML starter: ' + origin);
 const shutdown = () => { server.stop(true); };
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+`;
+
+const NODE_SERVER_TS = `import { readFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { toNodeListener } from '@0disoft/typehtml/adapters/node';
+import { createApp, port, origin } from './app.ts';
+
+const template = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+const server = createServer(toNodeListener(createApp(template), { origin, onError: console.error }));
+server.listen(port, '127.0.0.1', () => console.log('TypeHTML starter: ' + origin));
+const shutdown = () => { server.close(); server.closeAllConnections(); };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 `;

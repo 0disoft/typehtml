@@ -105,8 +105,8 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-async function starter(directory: string, installedCli: string): Promise<void> {
-  const created = JSON.parse(await run('installed CLI init', [node!, installedCli, 'init', directory, '--package-manager', 'npm', '--package-source', artifact], dirname(directory)));
+async function starter(directory: string, installedCli: string, runtime: 'node' | 'bun'): Promise<void> {
+  const created = JSON.parse(await run('installed CLI init', [node!, installedCli, 'init', directory, '--package-manager', 'npm', '--runtime', runtime, '--package-source', artifact], dirname(directory)));
   expect(created.status === 'created', 'installed init did not create the starter');
   const appPackagePath = join(directory, 'package.json');
   const appPackage = JSON.parse(await readFile(appPackagePath, 'utf8'));
@@ -126,9 +126,10 @@ async function starter(directory: string, installedCli: string): Promise<void> {
   checks.push('installed Node catalog CLI: static JSON manifest to read-only HTML and JSON');
   const sarif = JSON.parse(await run('installed Node Doctor SARIF', [node!, cli, 'doctor', '--config', 'doctor.config.json', '--format', 'sarif'], directory));
   expect(sarif.version === '2.1.0' && sarif.runs.length === 1, 'installed Doctor SARIF mismatch');
+  if (runtime === 'node') await run('Node starter ESM build', [...npm, 'run', 'build'], directory);
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
-  const server = Bun.spawn([bun, 'server.ts'], {
+  const server = Bun.spawn(runtime === 'bun' ? [bun, 'server.ts'] : [node!, 'build/server.js'], {
     cwd: directory, env: { ...process.env, PORT: String(port), ALLOWED_ORIGIN: origin },
     stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
   });
@@ -160,7 +161,7 @@ async function starter(directory: string, installedCli: string): Promise<void> {
     const receipt = await fetch(new URL(location, origin), { headers: { Cookie: cookie }, signal: AbortSignal.timeout(2000) });
     const receiptBody = await receipt.text();
     expect(receipt.status === 200 && receiptBody.includes('Hello Ada! Quantity: 2') && !receiptBody.includes('not public'), 'starter public receipt mismatch');
-    checks.push('standalone Bun HTTP: GET200, invalid422/raw preservation, valid303, public receipt200');
+    checks.push(`standalone ${runtime} HTTP: GET200, invalid422/raw preservation, valid303, public receipt200`);
   } finally {
     clearTimeout(deadline);
     if (server.exitCode === null) server.kill('SIGTERM');
@@ -199,7 +200,7 @@ async function main(): Promise<void> {
     const npmConsumer = join(fixture, 'npm-consumer');
     await consumer(npmConsumer, 'npm');
     await consumer(join(fixture, 'bun-consumer'), 'bun');
-    await starter(join(fixture, 'starter app'), join(npmConsumer, 'node_modules/@0disoft/typehtml/dist/cli.js'));
+    for (const runtime of ['bun', 'node'] as const) await starter(join(fixture, `${runtime} starter app`), join(npmConsumer, 'node_modules/@0disoft/typehtml/dist/cli.js'), runtime);
     expect(hash(await readFile(artifact)) === artifactSha256, 'tarball changed while package smoke was running');
   } catch (error) {
     failure = error;

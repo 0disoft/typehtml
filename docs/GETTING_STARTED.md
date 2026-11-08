@@ -7,17 +7,17 @@ TypeHTML is a server-side form boundary library and a static form checker. Start
 | Path | Runtime |
 | --- | --- |
 | Public core, contract helpers, Doctor, CLI | Node.js 22+ or Bun 1.4+ |
-| Generated starter server | Bun 1.4+ |
+| Starter server | Node.js 22+ (compiled ESM) or Bun 1.4+ |
 | SQLite order reference | Bun 1.4+ |
 
-Use npm or Bun to install dependencies. Choosing npm in `init` changes the package-manager instructions; it does not turn the Bun starter into a Node server. The public handler returns a standard `Response`, so an existing Node server can provide its own HTTP bridge.
+Use npm or Bun to install dependencies. Choose --runtime node or --runtime bun independently from --package-manager npm or --package-manager bun. The installed CLI defaults to Bun for compatibility; the standalone kit defaults to Node/npm. Node starters compile TypeScript into ESM before starting, including on Node 22.0 without native TypeScript support. The public handler still returns a standard Response for existing servers.
 
 ## Install the current alpha before registry publication
 
 The starter kit archive in `artifacts/typehtml-starter-<version>.tar.gz` contains a standalone initializer, the local npm tarball, a guide, and the optional VSIX. Extract it, then run:
 
 ```sh
-node create-typehtml.mjs ../my-app --package-manager npm
+node create-typehtml.mjs ../my-app --package-manager npm --runtime node
 cd ../my-app
 npm install
 npm run generate
@@ -69,7 +69,7 @@ After this version is published, its registry install command will be `npm insta
 | `form.json` | Single authoritative form definition with arbitrary application fields |
 | `generated/` | Types, form definition, hashes, and Doctor projection produced by `generate` |
 | `index.html` | Native form snapshot used by Doctor and served by the example |
-| `server.ts` | Bun server wiring explicit session/CSRF hooks to the public handler |
+| `app.ts`, `server.ts` | Shared Web handler with a thin Node or Bun server entry point |
 | `doctor.config.json` | Explicit HTML/form/action bindings and document URL |
 | `package.json` | Install, generate, Doctor, and development commands |
 | `README.md` | Instructions for the generated application |

@@ -20,10 +20,55 @@ describe('standalone starter creation', () => {
       expect(manifest.scripts.generate).toContain('--form form.json');
       expect(manifest.scripts.dev).toContain('bun run generate');
       expect(JSON.parse(await readFile(join(directory, 'form.json'), 'utf8')).format).toBe('typehtml-form/1');
-      expect(await readFile(join(directory, 'server.ts'), 'utf8')).toContain("from './generated/form-definition.ts'");
+      expect(await readFile(join(directory, 'app.ts'), 'utf8')).toContain("from './generated/form-definition.ts'");
+      expect(await readFile(join(directory, 'server.ts'), 'utf8')).toContain('Bun.serve');
+      expect(manifest.scripts.check).toBe('npm run generate:check && npm run typecheck && npm run doctor');
       expect(await readFile(join(directory, 'index.html'), 'utf8')).toContain('id="greeting"');
       expect(await readdir(directory)).not.toContain('node_modules');
       expect((await readdir(parent)).filter((name) => name.startsWith('.typehtml-init-'))).toEqual([]);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('selects runtime independently from the package manager and configures emitted Node ESM', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'typehtml-init-runtime-'));
+    try {
+      for (const runtime of ['bun', 'node'] as const) {
+        for (const packageManager of ['bun', 'npm'] as const) {
+          const directory = join(parent, `${runtime}-${packageManager}`);
+          const result = await initProject({ directory, runtime, packageManager });
+          const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
+          const config = JSON.parse(await readFile(join(directory, 'tsconfig.json'), 'utf8'));
+          const server = await readFile(join(directory, 'server.ts'), 'utf8');
+          expect(result.packageManager).toBe(packageManager);
+          expect(result.runtime).toBe(runtime === 'node' ? 'Node.js >=22.0.0' : 'Bun >=1.4.0');
+          expect(result.nextCommands[2]).toEqual([packageManager, 'run', 'check']);
+          expect(manifest.scripts.check).toBe(`${packageManager} run generate:check && ${packageManager} run typecheck && ${packageManager} run doctor`);
+          expect(manifest.devDependencies.typescript).toBe('^7');
+          expect(server).toContain("from './app.ts'");
+          if (runtime === 'node') {
+            expect(manifest.engines).toEqual({ node: '>=22.0.0' });
+            expect(manifest.devDependencies['@types/node']).toBe('^22');
+            expect(manifest.scripts.build).toBe(`${packageManager} run generate && tsc`);
+            expect(manifest.scripts.dev).toBe(`${packageManager} run build && node build/server.js`);
+            expect(config.compilerOptions.outDir).toBe('build');
+            expect(config.compilerOptions.rewriteRelativeImportExtensions).toBe(true);
+            expect(server).toContain("from '@0disoft/typehtml/adapters/node'");
+            expect(server).toContain("new URL('../index.html', import.meta.url)");
+            expect(server).not.toContain('Bun');
+          } else {
+            expect(manifest.engines).toEqual({ bun: '>=1.4.0' });
+            expect(config.compilerOptions.noEmit).toBe(true);
+            expect(server).toContain('Bun.serve');
+          }
+        }
+      }
+      const nodeApp = await readFile(join(parent, 'node-npm/app.ts'), 'utf8');
+      expect(nodeApp).toBe(await readFile(join(parent, 'bun-bun/app.ts'), 'utf8'));
+      const invalid = join(parent, 'invalid');
+      await expect(initProject({ directory: invalid, runtime: 'deno' as never })).rejects.toThrow('runtime must be bun or node');
+      expect(await readdir(parent)).not.toContain('invalid');
     } finally {
       await rm(parent, { recursive: true, force: true });
     }

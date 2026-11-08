@@ -8,7 +8,7 @@ The current package is **`0.1.0-alpha.5`**. Its public API can change before `1.
 
 ## Start a project
 
-Requirements: Node.js 22+ or Bun 1.4+ for the package and CLI. The starter server uses Bun 1.4+, including when npm installs its dependencies.
+Requirements: Node.js 22+ or Bun 1.4+ for the package and CLI. Choose a Node.js 22+ compiled ESM or Bun 1.4+ starter with --runtime node|bun, independently of the package manager.
 
 ```sh
 # In this repository
