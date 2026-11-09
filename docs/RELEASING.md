@@ -2,6 +2,8 @@
 
 The public package is `@0disoft/typehtml`. Prereleases use the `alpha` dist-tag and public access. Do not promote an alpha to `latest` as part of a routine alpha release. npm core publication, Git push/tags, GitHub release assets and Marketplace publication are separate actions. This guide does not configure automatic publishing or CI jobs.
 
+For the initial registry entry, npm may initialize `latest` to the same prerelease as `alpha`. Record the actual tags; `latest` does not turn that version into a stable API. Consumer instructions use `@alpha` or an exact version explicitly.
+
 ## Prepare the source
 
 1. Confirm the target version is not already published with `npm view @0disoft/typehtml@<version> version`. npm versions cannot be overwritten.

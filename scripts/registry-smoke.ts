@@ -33,7 +33,7 @@ async function run(command: string[], cwd: string): Promise<string> {
   } finally { clearTimeout(timer); }
 }
 async function get(url: string): Promise<Response> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(30_000), redirect: 'error' });
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000), redirect: 'error', headers: { Accept: url.endsWith('.tgz') ? 'application/octet-stream' : 'application/json' } });
   if (!response.ok) {
     await response.body?.cancel();
     throw new Error(`registry GET failed: ${response.status}`);
@@ -42,7 +42,7 @@ async function get(url: string): Promise<Response> {
 }
 
 try {
-  const packument = await (await get(`${registry}${encodeURIComponent(manifest.name)}`)).json() as {
+  const packument = await (await get(`${registry}${manifest.name.replace('/', '%2f')}`)).json() as {
     'dist-tags': Record<string, string>;
     versions: Record<string, { version: string; dist: { tarball: string; integrity: string } }>;
   };
