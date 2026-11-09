@@ -4,23 +4,30 @@ Typed contracts for native HTML forms and server boundaries.
 
 `@0disoft/typehtml` connects typed input schemas, native forms, and server handlers. Use a flat JSON contract or a Standard Schema validator with explicit transport fields. It provides bounded URL-encoded and opt-in multipart parsing, typed decoded input, public output validation, and a Doctor CLI that finds form/contract mismatches. It uses ordinary HTML and standard `Request`/`Response` routes.
 
-The current package is **`0.1.0-alpha.8`**. Its public API can change before `1.0`. The npm name `typehtml` belongs to another project; this package uses the `@0disoft/typehtml` scope. Install the locally built tarball; registry publication is a separate decision.
+The current package is **`0.1.0-alpha.8`**, distributed through the npm **`alpha`** channel. Its public API can change before `1.0`. Use the scoped name `@0disoft/typehtml`; the unscoped npm package `typehtml` belongs to another project.
+
+For an existing project:
+
+```sh
+npm install @0disoft/typehtml@alpha
+# Or:
+bun add @0disoft/typehtml@alpha
+```
 
 ## Start a project
 
 Requirements: Node.js 22+ or Bun 1.4+ for the package and CLI. Choose a Node.js 22+ compiled ESM or Bun 1.4+ starter with --runtime node|bun, independently of the package manager.
 
 ```sh
-# Extract artifacts/typehtml-starter-0.1.0-alpha.8.tar.gz first.
-node create-typehtml.mjs ../my-typehtml-app --runtime node --package-manager npm
-cd ../my-typehtml-app
+npx --yes --package=@0disoft/typehtml@alpha typehtml init ./my-typehtml-app --runtime node --package-manager npm
+cd my-typehtml-app
 npm install
 npm run generate
 npm run doctor
 npm run dev
 ```
 
-The initializer writes a small editable project. It does not install dependencies or start a server. See the [getting started guide](docs/GETTING_STARTED.md) for npm commands, existing-project use, and the generated files.
+The initializer writes a small editable project. It does not install dependencies or start a server. Open `http://127.0.0.1:3000/` after starting it. Use `@0disoft/typehtml@0.1.0-alpha.8` instead of `@alpha` when reproducing this exact release. See the [getting started guide](docs/GETTING_STARTED.md) for Bun commands, local archive installation, existing-project use, and the generated files.
 
 ## Define a form
 
@@ -67,7 +74,7 @@ typehtml catalog --config catalog.config.json --out-dir form-catalog
 
 `boundary` is a compatibility alias for the same CLI. Generation emits data and TypeScript types; it does not generate a server. Doctor defaults to one JSON report and does not execute application modules. Capture fetches only explicitly selected HTML states; watch and LSP start only when requested. See the [integration guide](docs/FORM_INTEGRATIONS.md) for complete options and examples.
 
-The [developer tools guide](docs/DEVELOPER_TOOLS.md) covers opt-in field-name type checking, native Request/Response test helpers, English/Korean validation messages, the separate local VS Code extension for saved HTML, and read-only HTML/JSON form catalogs. The existing form APIs and default responses are preserved.
+The [developer tools guide](docs/DEVELOPER_TOOLS.md) covers opt-in field-name type checking, native Request/Response test helpers, English/Korean validation messages, the separately built VS Code extension for saved HTML, and read-only HTML/JSON form catalogs. The existing form APIs and default responses are preserved.
 
 ## Support and responsibilities
 
@@ -94,6 +101,8 @@ bun run generate:check
 ```
 
 The [source repository](https://github.com/0disoft/typehtml) retains the immutable v0.5 design snapshot under `docs/design/v0.5/` and the implementation audit and P0 decision under `docs/acceptance/`. These research records are not included in the npm tarball. Reference tests are not evidence of product fit or of an unimplemented adapter.
+
+Maintainers: see [release instructions](https://github.com/0disoft/typehtml/blob/main/docs/RELEASING.md) for local packaging, the alpha channel and registry verification. The VS Code extension is not published to the Marketplace or bundled in the npm core package.
 
 ## License
 

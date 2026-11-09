@@ -4,23 +4,25 @@ This guide describes the additive `0.1.0-alpha.8` APIs. The existing `defineForm
 
 The core, adapters, and Doctor run on Node.js 22+ and Bun 1.4+. The optional SQLite idempotency adapter requires Bun 1.4+. No validator library, application server, browser runtime, or reactive form model is bundled by the new form APIs.
 
-## Install the local archive
+## Install
 
-Install the supplied archive in a consumer project. These commands install files; they do not publish to npm:
+Install the npm alpha in a consumer project:
 
 ```sh
-npm install "./0disoft-typehtml-0.1.0-alpha.8.tgz" "zod@^4"
+npm install @0disoft/typehtml@alpha "zod@^4"
 # Or:
-bun add "./0disoft-typehtml-0.1.0-alpha.8.tgz" "zod@^4"
+bun add @0disoft/typehtml@alpha "zod@^4"
 ```
 
-Use an absolute archive path when the file is elsewhere. Zod is the example's application dependency. Valibot 1 and ArkType 2 Standard Schema implementations are also tested; install the validator you use rather than all three. TypeHTML does not load your validator library automatically.
+Use `@0disoft/typehtml@0.1.0-alpha.8` for this exact release, or a local `.tgz` path for an archive build. Zod is the example's application dependency. Valibot 1 and ArkType 2 Standard Schema implementations are also tested; install the validator you use rather than all three. TypeHTML does not load your validator library automatically.
 
 | Package entry point | Purpose |
 | --- | --- |
 | `@0disoft/typehtml` | Both form APIs, field props, form state, Standard Schema validation, security, idempotency interfaces |
 | `@0disoft/typehtml/adapters/web` | Hono, Astro, React Router, and SvelteKit Request/Response bridges |
 | `@0disoft/typehtml/adapters/node` | Raw Node/Express listener and Fastify route factory |
+| `@0disoft/typehtml/adapters/react` | Browser-safe host React hook, native field-props mapping and error-summary focus |
+| `@0disoft/typehtml/adapters/svelte` | Browser-safe host Svelte store connection and error-summary focus |
 | `@0disoft/typehtml/doctor` | Analysis, rendered HTML capture, output formats, watch, stdio LSP |
 | `@0disoft/typehtml/testing` | Native Request construction and an in-process handler test client |
 | `@0disoft/typehtml/catalog` | Explicit form registration to read-only HTML and JSON |

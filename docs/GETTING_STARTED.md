@@ -12,7 +12,42 @@ TypeHTML is a server-side form boundary library and a static form checker. Start
 
 Use npm or Bun to install dependencies. Choose --runtime node or --runtime bun independently from --package-manager npm or --package-manager bun. The installed CLI defaults to Bun for compatibility; the standalone kit defaults to Node/npm. Node starters compile TypeScript into ESM before starting, including on Node 22.0 without native TypeScript support. The public handler still returns a standard Response for existing servers.
 
-## Install the current alpha before registry publication
+## Install from npm
+
+The package is `@0disoft/typehtml`, with prereleases on the `alpha` channel. Do not install the unrelated unscoped `typehtml` package.
+
+```sh
+# Existing project:
+npm install @0disoft/typehtml@alpha
+# Or:
+bun add @0disoft/typehtml@alpha
+```
+
+To create a Node/npm project without cloning this repository:
+
+```sh
+npx --yes --package=@0disoft/typehtml@alpha typehtml init ./my-app --runtime node --package-manager npm
+cd my-app
+npm install
+npm run generate
+npm run check
+npm run dev
+```
+
+For a Bun project:
+
+```sh
+bunx --package @0disoft/typehtml@alpha typehtml init ./my-bun-app --runtime bun --package-manager bun
+cd my-bun-app
+bun install
+bun run generate
+bun run check
+bun run dev
+```
+
+Open `http://127.0.0.1:3000/`. Use a new or empty target directory: `init` refuses to overwrite existing files and never installs dependencies or starts a server. Runtime/package-manager flags are explicit because the installed CLI retains its Bun default. Replace `@alpha` with `@0.1.0-alpha.8` to select this exact package release. Alpha releases may change their API; they are not a stable `1.0` contract.
+
+## Install from a local archive
 
 The starter kit archive in `artifacts/typehtml-starter-<version>.tar.gz` contains a standalone initializer, the local npm tarball, a guide, and the optional VSIX. Extract it, then run:
 
@@ -27,7 +62,7 @@ npm run dev
 
 No source checkout or manual dependency edit is needed. The initializer copies the tarball to `vendor/typehtml.tgz` and records `file:./vendor/typehtml.tgz`. Third-party dependencies may still require network access. Maintainers run `bun run pack`, package the VSIX under `integrations/vscode`, then run `bun run starter:pack`.
 
-The repository builds an installable npm tarball. Registry publication is a separate step; do not install the unrelated unscoped `typehtml` package.
+Maintainers can also build an installable npm tarball from the public source repository:
 
 ```sh
 # Run from the TypeHTML repository.
@@ -50,7 +85,7 @@ For npm installation:
 
 ```sh
 # Run the initializer from the built TypeHTML checkout.
-node dist/cli.js init ../my-typehtml-app --package-manager npm --package-source artifacts/0disoft-typehtml-0.1.0-alpha.8.tgz
+node dist/cli.js init ../my-typehtml-app --runtime node --package-manager npm --package-source artifacts/0disoft-typehtml-0.1.0-alpha.8.tgz
 cd ../my-typehtml-app
 npm install
 npm run generate
@@ -60,7 +95,7 @@ npm run dev
 
 Use a new or empty target directory. `init` refuses to overwrite an existing project's files and never runs package installation or a server for you. Paths containing spaces should be quoted using your shell's syntax.
 
-This release is distributed as local installation archives. No npm or Marketplace publication is performed.
+Local archives remain supported alongside the npm alpha channel. Archives under `artifacts/` are generated files, not tracked Git files. The optional VSIX is built separately from source; it is not in the core npm package and has no Marketplace listing. See [developer tools](DEVELOPER_TOOLS.md) for its build/install path.
 
 ## Starter files
 
@@ -78,7 +113,7 @@ Edit `form.json`, regenerate, and keep the HTML field names and constraints alig
 
 ## Existing projects
 
-Install the tarball, import `defineForm` and `createFormHandler` from `@0disoft/typehtml`, and connect the returned handler to a matching POST route. Keep your current renderer, router, authentication system, and package manager.
+Install `@0disoft/typehtml@alpha` (or a local tarball), import `defineForm` and `createFormHandler` from `@0disoft/typehtml`, and connect the returned handler to a matching POST route. Keep your current renderer, router, authentication system, and package manager.
 
 The [API guide](API.md) covers the handler hooks. Hooks must call your real policies and persistence code. A project that has no authenticated accounts must explicitly choose how it represents a public requester; TypeHTML does not infer access policy from field names.
 

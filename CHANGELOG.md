@@ -4,7 +4,7 @@
 
 - Expose the existing error-summary focus helper through the browser-safe React and Svelte entry points, avoiding Node crypto/storage imports in browser bundles; preserve the root export and behavior.
 - Add fresh installed-package Chrome verification for development/production SSR hydration, pre-hydration edits, native controls and no-JavaScript POST, host state/cancellation, keyboard focus and automated accessibility checks.
-- Refresh local core, starter-kit and VSIX 0.1.4 artifacts without publication. The extension runtime remains unchanged.
+- Distribute the core through npm's `alpha` channel and retain local core, starter-kit and VSIX 0.1.4 artifacts. The extension runtime remains unchanged and is not published to the Marketplace.
 
 ## 0.1.0-alpha.7 — Eight-stage regression fixes
 

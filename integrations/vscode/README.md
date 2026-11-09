@@ -9,8 +9,8 @@ application correctness.
 
 ## Install locally
 
-1. Install the TypeHTML `.tgz` in your application using `npm install <archive>`
-   or `bun add <archive>`.
+1. Install `@0disoft/typehtml@alpha` in your application using npm or Bun.
+   Local `.tgz` installations remain supported.
 2. In VS Code, choose **Extensions: Install from VSIX...** and select
    `typehtml-vscode-0.1.4.vsix` from this repository's `artifacts/` directory.
 3. Open a trusted local workspace folder and configure its Doctor JSON path:

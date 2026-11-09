@@ -138,7 +138,7 @@ callbacks. User callbacks and per-code overrides continue to work.
 ## Connect saved HTML snapshots to VS Code
 
 The optional `typehtml-vscode-0.1.4.vsix` is separate from the npm archive. Install
-the TypeHTML tarball in the application, use VS Code's **Extensions: Install from
+`@0disoft/typehtml@alpha` (or a local tarball) in the application, build the VSIX from the public repository as described below, use VS Code's **Extensions: Install from
 VSIX...**, then configure a trusted local workspace:
 
 ```json
@@ -160,6 +160,17 @@ rendered states remains a separate explicit operation. A successful snapshot
 check does not prove complete application correctness. The extension source and
 build instructions are under `integrations/vscode` in the source repository;
 neither the VSIX nor its dependencies are included in the core npm package.
+
+Build it with Bun 1.4+ and Node.js 22+/npm installed:
+
+```sh
+git clone https://github.com/0disoft/typehtml.git
+cd typehtml/integrations/vscode
+npm ci
+npm run package
+```
+
+The generated archive is `../../artifacts/typehtml-vscode-0.1.4.vsix`. It has no Marketplace listing. See the extension's [source README](https://github.com/0disoft/typehtml/blob/main/integrations/vscode/README.md) for workspace/trust behavior.
 
 ## Generate a static form catalog
 
